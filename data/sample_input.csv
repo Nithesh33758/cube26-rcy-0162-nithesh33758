@@ -1,0 +1,9 @@
+line_id,report_type,unit_id,org_id,sku,fnsku,fba_shipment_id,order_id,charge_type,quantity,amount_usd,posted_date
+FEE-0003-2,fee_report,UNIT-0003,org_demo_bravo,SKU-PUZZLE-500,X00DUMMY003,FBA-DUMMY-100,ORD-DUMMY-50003,fulfilment_fee_weight_tier,1,5.10,2026-06-23
+FEE-0014-1,fee_report,UNIT-0014,org_demo_alpha,SKU-LAMP-LED,X00DUMMY014,FBA-DUMMY-101,,inbound_defect_fee,1,2.00,2026-07-18
+FEE-0018-1,fee_report,UNIT-0018,org_demo_bravo,SKU-BOTTLE-750,X00DUMMY018,FBA-DUMMY-101,,inbound_defect_fee,1,1.00,2026-07-20
+FEE-0038-2,fee_report,UNIT-0038,org_demo_alpha,SKU-PROT-1KG,X00DUMMY038,FBA-DUMMY-103,ORD-DUMMY-50038,refund_issued_item_not_returned,1,0.00,2026-07-19
+FEE-0041-2,fee_report,UNIT-0041,org_demo_alpha,SKU-LEASH-6FT,X00DUMMY041,FBA-DUMMY-104,ORD-DUMMY-50041,refund_issued_item_not_returned,1,0.00,2026-07-08
+FEE-0051-1,fee_report,UNIT-0051,org_demo_bravo,SKU-CABLE-USBC,X00DUMMY051,FBA-DUMMY-105,ORD-DUMMY-50051,fulfilment_fee_weight_tier,1,5.50,2026-06-08
+FEE-0064-1,inventory_adjustment,UNIT-0064,org_demo_alpha,SKU-BOTTLE-750,X00DUMMY064,FBA-DUMMY-106,,lost_inbound,1,0.00,2026-06-19
+FEE-0092-1,fee_report,UNIT-0092,org_demo_alpha,SKU-SERUM-30,X00DUMMY092,FBA-DUMMY-109,ORD-DUMMY-50092,fulfilment_fee_weight_tier,1,4.25,2026-06-12

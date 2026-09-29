@@ -1,0 +1,32 @@
+JAVA UPGRADE WORK LOG
+Date: 2026-09-26
+Project: recovery-manager-backend
+Upgrade session: 20260926074757
+
+COMPLETED
+- Upgraded the backend Java runtime/compiler target from Java 24 to Java 25 LTS.
+- Installed Microsoft JDK 25.0.2 and Apache Maven 3.9.15 under the user profile.
+- Updated backend/pom.xml to Spring Boot 4.0.8, spring-boot-starter-webmvc, Springdoc 3.0.3, and maven-compiler-plugin 3.16.0; pinned the Spring Boot Maven plugin to the Boot version.
+- Added backend/src/main/java/com/cube/buildathon/recoverymanager/backend/service/CsvValidationService.java. The baseline test sources referenced this missing service and could not compile before the upgrade; the implementation supports the assertions in the existing tests.
+
+VALIDATION
+- Java 25 clean compilation of production and test sources succeeded.
+- Java 25 clean verify/package succeeded and produced backend/target/recovery-manager-backend-0.0.1-SNAPSHOT.jar.
+- Final tests: 4 passed, 0 failed, 0 errors, 0 skipped.
+- OSV fallback scan found no known issues in the seven resolved direct Maven dependencies. Transitive dependencies were not scanned because the integrated Java CVE scanner was unavailable.
+- JaCoCo coverage was not measured; the project has no configured coverage plugin.
+
+BASELINE AND WORKSPACE NOTES
+- Under Java 24, production compilation succeeded, but test compilation failed because CsvValidationService was absent. That missing class was added in the upgrade work; all final tests pass under Java 25.
+- The Java 25 task upgraded the runtime/framework only. It did not complete the Recovery Manager backend product; the project progress notes still describe its data-backed backend as not started.
+- Git metadata is unavailable. No branch or commit was created; changes are unversioned.
+- VS Code reports its Maven project configuration needs an update, although Maven compilation, tests, and packaging succeed. Refresh the Maven project configuration in VS Code if the diagnostic remains.
+
+FRONTEND
+- Started the Vite frontend at http://127.0.0.1:3000/.
+- PowerShell's HTML parsing security prompt prevented automatic browser launch; open the URL directly.
+
+DETAILED SESSION RECORDS
+- backend/.github/modernize/java-upgrade/20260926074757/plan.md
+- backend/.github/modernize/java-upgrade/20260926074757/progress.md
+- backend/.github/modernize/java-upgrade/20260926074757/summary.md

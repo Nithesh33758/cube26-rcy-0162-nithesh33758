@@ -1,0 +1,6 @@
+{
+  "name": "Recovery Manager",
+  "description": "Enterprise ecommerce fee and reimbursement recovery operations console.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

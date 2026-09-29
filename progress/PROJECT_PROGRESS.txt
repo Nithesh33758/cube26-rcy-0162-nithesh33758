@@ -1,0 +1,454 @@
+# ============================================================
+PROJECT PROGRESS - RECOVERY MANAGER
+LAST UPDATED:
+2026-09-29
+
+CURRENT PHASE:
+Contract-based charge and reimbursement ingestion implemented; evidence/policy integration remains pending
+
+CURRENT STATUS:
+The backend accepts both the legacy 12-column charge ledger and normalized charge CSVs from recovery-data-contract.md. It has a separate reimbursement CSV import endpoint and conservatively suppresses duplicate claims when an exact order/SKU/currency reimbursement covers the charge after cancellation netting. A Gemini REST provider is integrated under backend/src/main/java/.../ai and makes one call per unit when GEMINI_API_KEY is configured. Without the key, evidence, or non-empty supplied rules, it safely returns INSUFFICIENT_EVIDENCE. The official evidence-contract.md and authoritative Amazon policy data remain unavailable, so live Gemini use and real-world decision quality are not verified. MySQL is retained by user choice; application tenant scoping is in place, but MySQL cannot satisfy RULES.md's database-enforced RLS requirement. See SESSION_HANDOFF.txt for setup and limitations.
+
+HISTORICAL NOTE:
+The detailed sections below describe the 2026-09-26 prototype baseline and may contain status statements superseded by this update.
+
+============================================================
+1. PROJECT PURPOSE
+============================================================
+Recovery Manager is intended to analyze ecommerce fee and reimbursement charges against relevant upstream operational evidence and applicable authoritative requirements. It should produce one decision per charge:
+
+CLAIM
+REJECT
+UNCERTAIN
+
+UNCERTAIN is a first-class decision for missing, insufficient, or contradictory evidence and should be routed for human review. The current UI models these concepts, but does not yet perform the real recovery analysis.
+
+============================================================
+2. COMPLETED WORK
+============================================================
+[x] Frontend
+- React/TypeScript Vite app exists under recovery-manager/.
+- Responsive screens and desktop/mobile navigation are implemented.
+- Current experience is a UI prototype using synthetic data.
+
+[x] Upload page
+- CSV choose-file and drag/drop controls exist.
+- File extension/type and 25 MiB size limit are checked.
+- The uploaded CSV header is checked against the 12 required snake_case columns.
+- File size and non-empty data-row count are displayed.
+- Selecting a file does not start analysis.
+
+[x] Expected Ledger Columns UI
+- Upload page lists the exact current required header names; additional columns are allowed during schema validation.
+- IMPORTANT: The attachment/template's title-cased names and "Ammount" are not the current source contract. Current source and sample_input.csv use amount_usd and the other snake_case names listed in section 4.
+
+[x] Processing screen
+- A separate seven-step animated screen exists.
+- It is a timer-driven simulation with a fixed 320-record counter, not a real processing pipeline.
+- A development control can fast-forward to results or simulate a failure.
+
+[x] Results screen
+- Charge summary, decision counts, precision figure, charge table, and CSV export UI exist.
+- The displayed charges come from the generated mock dataset, not from the uploaded file.
+
+[x] Charge Investigation
+- Charge detail, decision explanation, requirement checks, evidence timeline, previous/next navigation, copy-reference action, and local audit toggle exist.
+
+[x] Dashboard
+- Eight scroll-based sections exist, including summary metrics, recovery trend, decision distribution, funnel, review queue, activity feed, and final summary.
+- Dashboard values are fixed demonstration data.
+
+[x] Evidence page
+- One unified evidence table is implemented with search, manager/status filters, sorting, pagination, a detail modal, and charge navigation.
+- Rows are derived from local mock charges/evidence; root data/upstream CSV files are not loaded by the page.
+
+[x] Reviews page
+- Review queue UI has status filters and local CLAIM/REJECT actions.
+- Original decision and reviewed decision are separate fields in UI state.
+- It is not persisted, and an operator-entered override reason is not captured.
+
+[x] Analytics page
+- Metrics and fee-type breakdown table exist; values are static demo data.
+
+[x] Sticky top navigation
+- Sticky horizontal desktop nav and mobile menu exist for Dashboard, Charges, Evidence, Reviews, and Analytics.
+
+[x] Frontend validation
+- npm run lint (tsc --noEmit) passes.
+- npm run build passes. Vite emits a non-blocking config-loader warning about __dirname in vite.config.ts.
+- The browser accepted data/sample_input.csv with all 12 required columns and displayed 8 data rows.
+
+============================================================
+3. CURRENT FRONTEND WORKFLOW
+============================================================
+Upload CSV
+  -> File Selected
+  -> Validate expected ledger header and show metadata
+  -> User explicitly clicks Start Analysis
+  -> Processing screen
+  -> Results
+  -> Charge Investigation
+
+This navigation is implemented. CSV selection does NOT automatically start analysis. The Start Analysis action alone changes the app state to PROCESSING. Invalid headers keep the user at file confirmation and disable Start Analysis.
+
+Limit: validation currently inspects the header and counts non-empty lines. Uploaded record values are not mapped to Charge objects. App.tsx initializes charges from generateFullDataset() regardless of the selected file. ProcessingPipeline.tsx animates fixed steps and fixed counts, then transitions to the mock results.
+
+============================================================
+4. INPUT CSV REQUIREMENTS
+============================================================
+Current required header names (exact, case-sensitive source values):
+
+line_id
+report_type
+unit_id
+org_id
+sku
+fnsku
+fba_shipment_id
+order_id
+charge_type
+quantity
+amount_usd
+posted_date
+
+Additional headers are allowed. The upload validator checks the first CSV line, trims parsed header text, requires all 12 names, and rejects non-CSV files or files over 25 MiB. It reads the uploaded file in the browser to count non-empty data lines; it does not parse row values or perform robust quoted-field parsing for the full dataset.
+
+Schema note: The supplied handoff template instead listed "Line ID", "Report Type", "Unit Id", "org id", "Quantity", "Ammount", etc. Do not change the current implementation to those names without checking the official contract and fixture. Current data/sample_input.csv and recovery-manager/src/types.ts agree on snake_case and amount_usd.
+
+============================================================
+5. FRONTEND PAGES / FEATURES
+============================================================
+PAGE: Dashboard
+STATUS: COMPLETED UI; mock data
+PURPOSE: Summary and links into charge, evidence, review, and analytics screens.
+IMPORTANT COMPONENTS: DashboardView.tsx, dashboardData.ts, useInView.ts.
+CURRENT LIMITATIONS: Static metrics and activity; not derived from imported CSV or real evaluations.
+
+PAGE: Charges
+STATUS: COMPLETED UI; mock data
+PURPOSE: Search/filter and browse the recovery charge ledger.
+IMPORTANT COMPONENTS: ResultsView.tsx, ChargeTable.tsx, DecisionBadge.tsx.
+CURRENT LIMITATIONS: Charge rows and results are generated local fixtures; review/analytics/evidence counts are also fixed in places.
+
+PAGE: Evidence
+STATUS: COMPLETED UI; mock data
+PURPOSE: Browse a unified operational evidence ledger and open a detail view or related charge.
+IMPORTANT COMPONENTS: EvidenceExplorer.tsx.
+CURRENT LIMITATIONS: Does not read data/upstream/*.csv or retrieve records from a service.
+
+PAGE: Reviews
+STATUS: IN PROGRESS; local-only interaction
+PURPOSE: Inspect uncertain/flagged cases and apply a displayed CLAIM or REJECT review action.
+IMPORTANT COMPONENTS: ReviewQueue.tsx, INITIAL_REVIEW_ITEMS in mockData.ts.
+CURRENT LIMITATIONS: Four fixed initial items; state is local; no persistence, escalation workflow, or user-entered override reason.
+
+PAGE: Analytics
+STATUS: COMPLETED UI; mock data
+PURPOSE: Show claim precision, evaluation counts, and fee-type breakdown.
+IMPORTANT COMPONENTS: AnalyticsPanel.tsx, ANALYTICS_DATA in mockData.ts.
+CURRENT LIMITATIONS: Static numbers, not a measured evaluation report or uploaded-ledger analysis.
+
+PAGE: Upload
+STATUS: COMPLETED UI; header validation only
+PURPOSE: Select a fee/reimbursement CSV and check the required header.
+IMPORTANT COMPONENTS: UploadPanel.tsx, FileStatus.tsx, EXPECTED_LEDGER_COLUMNS in types.ts.
+CURRENT LIMITATIONS: File contents are not converted to charge records; the built-in demo button supplies synthetic metadata.
+
+PAGE: Processing
+STATUS: COMPLETED UI; simulated
+PURPOSE: Separate progress screen between explicit start and results.
+IMPORTANT COMPONENTS: ProcessingPipeline.tsx.
+CURRENT LIMITATIONS: Fixed 320 count and timer-based step sequence; no actual evidence or rules work.
+
+PAGE: Results
+STATUS: COMPLETED UI; mock data
+PURPOSE: Show decision summaries, charge list, and export control.
+IMPORTANT COMPONENTS: ResultsView.tsx, ChargeTable.tsx.
+CURRENT LIMITATIONS: Data is not produced from the uploaded CSV; exported rows are mock charge objects.
+
+PAGE: Charge Investigation
+STATUS: COMPLETED UI; mock data
+PURPOSE: Inspect an individual charge, requirements, evidence trail, and related charges.
+IMPORTANT COMPONENTS: ChargeInvestigation.tsx.
+CURRENT LIMITATIONS: Evidence and requirements are fixture content; audit toggle is local state only.
+
+============================================================
+6. DASHBOARD STATUS
+============================================================
+DashboardView.tsx contains eight scroll-animated sections. All displayed dashboard numbers and story data are fixed mock/demo data in dashboardData.ts or inline in DashboardView.tsx, not real business results.
+
+- Metrics: total charges 1,248, potential recovery INR 8.42L, 428 claims recommended, 208 uncertain, claim precision 91.4% (demo values).
+- Recovery trend: implemented as a custom SVG line chart with hoverable points and animated path; the plotted periods/values are mock.
+- Decision distribution: implemented as a single horizontal segmented bar for CLAIM / REJECT / UNCERTAIN, plus text summaries; mock counts are 428 / 612 / 208.
+- Recovery funnel: six fixed stages from total charges to recovery value.
+- Review queue: fixed sample items and counts.
+- Recent activity: four inline fixed sample events.
+- Final summary: fixed count-up values and a View All Charges action.
+- Scroll animations: IntersectionObserver-based useInView hook, CSS transitions, and count-up hooks in hooks/useInView.ts.
+
+The two primary visualizations are Recovery Value Over Time and CLAIM / REJECT / UNCERTAIN distribution. The current dashboard also has a funnel, metric blocks, queue, and activity timeline; avoid adding more graphs without an explicit need. Dashboard values differ from the separate 320-row mock charge/analytics dataset and must not be presented as measured results.
+
+============================================================
+7. EVIDENCE PAGE STATUS
+============================================================
+The Evidence page uses ONE unified evidence table. Do not recreate it as separate Receiving, Prep, Pack, and Returns tables.
+
+Current visible table columns:
+- Unit ID (also shows Charge ID beneath it)
+- Evidence Type
+- Source Manager
+- Requirement
+- Evidence Status
+- Key Finding (may include a telemetry metric)
+- Timestamp
+- Action (open telemetry details or related charge dossier)
+
+Implemented controls: search, manager tabs, evidence-status select, sortable Unit ID / Evidence Type / Source Manager / Evidence Status / Timestamp, 15-row pagination, details modal, and navigation to the associated charge. Evidence manager categories are Receiving Manager, Prep Manager, Pack Manager, and Returns Manager. Missing-requirement rows are synthesized from mock requirement records.
+
+The upstream CSVs exist at data/upstream/receiving_sample.csv, prep_sample.csv, pack_sample.csv, and returns_sample.csv, but EvidenceExplorer does not import them. Actual Unit ID joins are NOT STARTED.
+
+============================================================
+8. AI / BACKEND STATUS
+============================================================
+Backend: NOT STARTED
+Database: NOT STARTED
+CSV Processing: IN PROGRESS (file/header/size/line-count handling exists; row-to-charge parsing and real analysis do not)
+Evidence Retrieval: NOT STARTED (the UI displays mock embedded evidence; upstream files are not queried)
+Requirements Retrieval: NOT STARTED (no authoritative source lookup)
+AI Integration: NOT STARTED (no model call found in source; @google/genai is only a declared dependency, and .env.example is a placeholder)
+Review System: IN PROGRESS (interactive mock UI only; no persistence or override reason capture)
+Deployment: NOT STARTED (local Vite development server only; no deployment configuration confirmed)
+
+metadata.json advertises a server-side Gemini capability and README.md describes setting GEMINI_API_KEY, but current app source has no Gemini request, backend/API route, or server implementation. Treat the UI as a prototype, not a working AI recovery service.
+
+============================================================
+9. INTENDED BACKEND ARCHITECTURE
+============================================================
+PLANNED flow:
+
+CSV
+  -> Parse / Validate
+  -> Match Unit Id (and org_id tenancy)
+  -> Retrieve Relevant Evidence
+  -> Retrieve Applicable Requirements from authoritative sources
+  -> AI Reasoning
+  -> CLAIM / REJECT / UNCERTAIN decision per charge
+  -> Save result with evidence/rule traceability
+  -> Route UNCERTAIN and other review-required cases
+  -> Dashboard / Results
+
+The AI must not be trained on the database. The backend should retrieve the necessary records and send only the relevant charge(s), evidence, and requirements to the model. Preserve tenant isolation and evidence references. Do not silently discard input when a model/dependency fails; save a pending/review state.
+
+This is intended architecture only; none of this service pipeline is implemented yet.
+
+============================================================
+10. AI REASONING RULE
+============================================================
+PLANNED, NOT IMPLEMENTED: group all charges by Unit Id, retrieve the relevant evidence and requirements once for that unit, and make ONE AI call per unit containing all relevant charges plus that context. The AI response should contain an individual CLAIM, REJECT, or UNCERTAIN decision for each charge. Different Unit Ids receive separate calls. Missing or contradictory evidence should result in UNCERTAIN/review rather than an unsupported claim. No AI calls currently occur.
+
+Example intended batching:
+UNIT-0001 -> one call with Charge A, Charge B, Charge C, relevant evidence, requirements
+UNIT-0002 -> one call with Charge D, relevant evidence, requirements
+
+============================================================
+11. IMPORTANT PROJECT DECISIONS
+============================================================
+Keep these decisions unless the project owner explicitly changes them:
+
+1. CSV selection does not automatically start analysis. (Implemented.)
+2. Start Analysis explicitly starts processing. (Implemented.)
+3. Processing is separate from Results. (Implemented as screens; processing is simulated.)
+4. UNCERTAIN is a first-class decision and review outcome. (Type/UI exist; real decision logic does not.)
+5. Evidence is intended to be retrieved based on Unit Id. (Data relationship/UI only; upstream retrieval is not implemented.)
+6. Multiple charges for one Unit Id must be reasoned about together. (Planned.)
+7. Intended AI architecture is one call per Unit. (Planned.)
+8. Send only relevant evidence and requirements to AI, not the entire database. (Planned.)
+9. Evidence page uses one unified table. (Implemented.)
+10. Do not overload the dashboard with graphs. Keep the recovery trend and decision distribution as the two primary visualizations.
+11. Dashboard uses scroll-driven animations. (Implemented.)
+12. Navigation is a sticky horizontal top bar with a mobile menu. (Implemented.)
+13. Manager Root-Cause Origin section was removed; do not reintroduce it without instruction. No such section is present in current source.
+14. Do not unnecessarily redesign existing working pages.
+15. When human overrides are implemented persistently, preserve the original AI/system decision and record the new decision and override reason. Current mock UI keeps separate originalDecision/reviewedDecision fields but has no persistence or free-form reason capture.
+
+============================================================
+12. CURRENT MOCK DATA
+============================================================
+NAME: Generated charge ledger
+LOCATION: recovery-manager/src/data/mockData.ts (INITIAL_CHARGES and generateFullDataset)
+PURPOSE: Initializes 320 charge records with generated decision, evidence, and requirement details.
+REAL OR MOCK: MOCK; deterministic synthetic fixture data.
+
+NAME: Review queue cases
+LOCATION: recovery-manager/src/data/mockData.ts (INITIAL_REVIEW_ITEMS)
+PURPOSE: Seeds the review screen with four sample cases.
+REAL OR MOCK: MOCK.
+
+NAME: Analytics results
+LOCATION: recovery-manager/src/data/mockData.ts (ANALYTICS_DATA)
+PURPOSE: Supplies 320-charge precision, false-positive, false-negative, uncertain, and fee-type figures.
+REAL OR MOCK: MOCK; not an independently measured evaluation.
+
+NAME: Dashboard metrics and records
+LOCATION: recovery-manager/src/data/dashboardData.ts and inline DashboardView.tsx events
+PURPOSE: Supplies 1,248-charge metrics, trend, decision distribution, funnel, evidence quality, queue, and activity.
+REAL OR MOCK: MOCK; these dashboard figures do not correspond to the 320-charge result fixture.
+
+NAME: Built-in demo ledger
+LOCATION: recovery-manager/src/components/UploadPanel.tsx (Load Demo Ledger action)
+PURPOSE: Creates synthetic file metadata to demonstrate upload confirmation/flow.
+REAL OR MOCK: MOCK; it does not load a CSV file's 320 actual rows.
+
+NAME: Input CSV fixture
+LOCATION: data/sample_input.csv
+PURPOSE: Synthetic 8-row example accepted by current header validation.
+REAL OR MOCK: Fixture file with synthetic data; not live customer or authoritative fee data.
+
+NAME: Upstream evidence CSV fixtures
+LOCATION: data/upstream/{receiving_sample.csv,prep_sample.csv,pack_sample.csv,returns_sample.csv}
+PURPOSE: Reference evidence records for future unit matching.
+REAL OR MOCK: Synthetic reference data; not currently connected to the frontend.
+
+============================================================
+13. CURRENT FILE STRUCTURE
+============================================================
+Project root:
+- README.md: challenge purpose, expected submission and evaluation.
+- RULES.md: repository and engineering requirements.
+- GITHUB-GUIDE.md: contribution/setup guidance.
+- data/README.md: sample data contract notes; it refers to fee_report_sample.csv, which is not present in the inspected data folder.
+- data/sample_input.csv: current fee-ledger fixture.
+- data/upstream/: receiving_sample.csv, prep_sample.csv, pack_sample.csv, returns_sample.csv.
+- submissions/_TEMPLATE/: submission guidance/template.
+
+Frontend app:
+recovery-manager/
+- package.json / package-lock.json: scripts and dependencies; package currently has the generic name react-example.
+- index.html: browser title and Vite root.
+- vite.config.ts: React, Tailwind Vite plugins and dev-server configuration.
+- tsconfig.json: TypeScript configuration.
+- .env.example: placeholder Gemini/API URL settings; no source integration currently uses them.
+- README.md: AI Studio template setup instructions; currently stale relative to app capabilities.
+- metadata.json: app metadata, including an advertised Gemini server capability.
+- src/main.tsx: React entry point.
+- src/App.tsx: application state and page navigation/workflow wiring.
+- src/types.ts: charge/evidence/review types, app states, and required CSV headers.
+- src/index.css: Tailwind import, theme fonts, and base styles.
+- src/components/UploadPanel.tsx: file selection, header validation, demo controls.
+- src/components/FileStatus.tsx: upload confirmation and schema status.
+- src/components/ProcessingPipeline.tsx: simulated seven-step processing view.
+- src/components/ResultsView.tsx: mock result metrics and CSV export.
+- src/components/ChargeTable.tsx: charge search/filter/pagination table.
+- src/components/ChargeInvestigation.tsx: charge detail, requirements, evidence, audit UI.
+- src/components/DashboardView.tsx: eight-section dashboard UI.
+- src/components/EvidenceExplorer.tsx: unified evidence ledger and modal.
+- src/components/ReviewQueue.tsx: local review actions and status filters.
+- src/components/AnalyticsPanel.tsx: static evaluation-style metrics and breakdown.
+- src/components/Header.tsx: sticky nav and mobile menu.
+- src/components/DecisionBadge.tsx: decision label styling.
+- src/components/ErrorState.tsx: upload/processing error UI.
+- src/data/mockData.ts: generated charges, initial review cases, analytics fixture.
+- src/data/dashboardData.ts: dashboard fixture values.
+- src/hooks/useInView.ts: IntersectionObserver and count-up hooks.
+
+============================================================
+14. KNOWN ISSUES
+============================================================
+[ ] Uploaded CSV values are not parsed into charges. Results remain the generated mock dataset even after uploading a valid report.
+Details: ProcessingPipeline.tsx uses fixed 320-record steps; App.tsx initializes charges with generateFullDataset().
+
+[ ] Evidence CSVs are not joined to charges and no authoritative requirements are retrieved.
+Details: The evidence page only derives rows from mocked Charge objects; evidence and rule descriptions are synthetic.
+
+[ ] Demo metrics disagree across screens and are not real business results.
+Details: Dashboard uses 1,248 charges and 91.4% precision; Results uses generated 320 charges and hard-coded 96.7% precision; Analytics uses separate fixed metrics.
+
+[ ] Review decisions are transient and do not capture an operator-entered override reason.
+Details: ReviewQueue updates component state only; no API/database persistence or audit record exists.
+
+[ ] Repository data documentation does not match the current data folder.
+Details: data/README.md refers to fee_report_sample.csv (61 rows), while the inspected folder contains sample_input.csv and upstream/ files, not fee_report_sample.csv.
+
+[ ] AI Studio/backend documentation is not implemented by source.
+Details: recovery-manager/README.md asks for GEMINI_API_KEY and metadata.json advertises server-side Gemini, but no source model calls or backend routes were found.
+
+[ ] Build warning in vite.config.ts.
+Details: Vite warns that __dirname is unsupported by its future native config loader; current build still succeeds.
+
+[ ] Test automation is absent.
+Details: package.json has lint/build scripts but no test script; no test files were found in recovery-manager/src.
+
+[ ] Active workspace has no usable Git repository metadata.
+Details: git status/diff reported that the workspace is not a Git repository. This is an environment limitation, not a runtime app error.
+
+============================================================
+15. NEXT STEPS
+============================================================
+### P0 - NEXT IMMEDIATE TASK
+Implement real CSV row parsing and map uploaded rows into the app's charge model. Preserve the current explicit Start Analysis gate, replace the fixed 320 counter with the actual row count, and ensure results/export are based on the selected file. Add focused tests for valid headers, missing headers, quoting/blank lines, and row-to-charge mapping. Do not present mock evidence decisions as real decisions.
+
+### P1 - AFTER THAT
+Implement server-side evidence retrieval from the upstream records keyed by org_id and unit_id, plus authoritative requirements lookup. Define persisted result/evidence/rule references and tenant isolation before adding shared database storage.
+
+### P2 - LATER
+Implement one AI call per Unit Id containing all charges for that unit plus only relevant evidence and requirements; return per-charge CLAIM/REJECT/UNCERTAIN decisions. Persist review overrides with original decision, new decision, reason, reviewer, and timestamp. Add evaluation on a separate labeled set, then configure and verify deployment.
+
+============================================================
+16. CURRENT STOP POINT
+============================================================
+LAST COMPLETED TASK:
+Inspected the project and created this source-grounded handoff. The previous coding task also fixed the Vite/esbuild install conflict, aligned CSV validation with sample_input.csv, corrected upload metadata, and verified the sample in the browser.
+
+CURRENT TASK:
+NONE
+
+CURRENT STATE:
+Frontend builds and type-checks. The local Vite site was running at http://127.0.0.1:3000/ and the real sample_input.csv was accepted with 12/12 headers and 8 data rows. Analysis remains synthetic and does not use the uploaded row values.
+
+LAST FILES MODIFIED:
+- recovery-manager/package.json (esbuild range changed to ^0.28.0)
+- recovery-manager/package-lock.json (created by npm install)
+- recovery-manager/src/types.ts (required header names aligned to snake_case)
+- recovery-manager/src/components/UploadPanel.tsx (CSV sizing/row count, schema labels, demo disclosure)
+- recovery-manager/src/components/FileStatus.tsx (accurate upload metadata and demo wording)
+- PROJECT_PROGRESS.txt (this file)
+
+NEXT ACTION:
+Start P0: add a tested CSV parsing/mapping layer and wire actual uploaded rows through the existing explicit Start Analysis flow, replacing the mock-only result source.
+
+BLOCKERS:
+No technical blocker to the P0 frontend/data parsing task. There is no Git metadata in the active workspace. Backend/database/model/deployment capabilities are not yet present.
+
+============================================================
+17. AI HANDOFF INSTRUCTIONS
+============================================================
+When another AI model reads this file:
+
+1. Read this file completely before modifying code.
+2. Inspect the repository before making assumptions.
+3. Continue from CURRENT STOP POINT.
+4. Do not redo completed work.
+5. Do not redesign working frontend components unnecessarily.
+6. Follow IMPORTANT PROJECT DECISIONS.
+7. Make small, targeted changes.
+8. Test changes before marking them COMPLETED.
+9. Update this file after completing a significant task.
+10. Update CURRENT STOP POINT before ending the session.
+11. Clearly record what files were changed.
+12. Clearly record what the next AI should do.
+
+============================================================
+18. PROGRESS HISTORY
+============================================================
+[2026-09-26]
+COMPLETED:
+- Installed frontend dependencies after correcting the esbuild peer range required by Vite 8.
+- Updated the upload schema to the snake_case fields in data/sample_input.csv.
+- Corrected uploaded file size and row-count reporting and clarified that current analysis output is synthetic.
+- Verified npm run lint, npm run build, and browser validation of sample_input.csv (12/12 required columns, 8 rows).
+- Created this PROJECT_PROGRESS.txt from inspected source and fixtures.
+NEXT:
+- Implement actual uploaded-row parsing and feed those rows through the explicit Start Analysis flow.
+
+============================================================
+END OF PROJECT PROGRESS

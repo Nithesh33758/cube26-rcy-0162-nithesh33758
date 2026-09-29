@@ -1,0 +1,31 @@
+@import "tailwindcss";
+
+@theme {
+  --font-heading: "Space Grotesk", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-sans: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "IBM Plex Mono", monospace;
+  --color-canvas: #F5F3EE;
+  --color-ink: #151515;
+  --color-accent: #C64B32;
+  --color-card: #FAF8F5;
+  --color-surface: #FFFFFF;
+  --color-border-subtle: #E2DFD7;
+}
+
+body {
+  font-family: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background-color: #F5F3EE;
+  color: #151515;
+  letter-spacing: -0.01em;
+}
+
+h1, h2, h3, h4, h5, h6, .font-heading {
+  font-family: "Space Grotesk", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  letter-spacing: -0.03em;
+}
+
+.font-mono, .tabular-nums {
+  font-family: "IBM Plex Mono", monospace;
+  font-variant-numeric: tabular-nums;
+}
+

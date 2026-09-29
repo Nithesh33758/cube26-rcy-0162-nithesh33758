@@ -1,0 +1,151 @@
+Recovery Manager - Session Handoff
+Date: 2026-09-29
+
+Latest project state
+--------------------
+- Supports the legacy charge ledger and normalized charge CSV schema from recovery-data-contract.md.
+- Adds tenant-scoped POST /api/reimbursements/upload for the documented reimbursement report schema.
+- Analysis nets cancellation rows and marks ALREADY_REIMBURSED only when strict order/SKU/currency/quantity/amount matching covers a charge. Credit balances are consumed once.
+- Adds backend/ai/GeminiUnitDecisionProvider.java using Gemini's pretrained REST API with one call per unit when configured. Set GEMINI_API_KEY in the backend process environment; GEMINI_MODEL defaults to gemini-3.8-flash. Never put the key in frontend env files or commit it.
+- Provider restricts output to CONTESTED, ACCEPTED, INSUFFICIENT_EVIDENCE and validates evidence/rule IDs, charge type, evidence status, and evidence date. Reimbursement matching remains deterministic; absent API key/evidence/rules and model failures fail open to review.
+- Official evidence-contract.md and authoritative Amazon policy data are still missing. A live Gemini call was not verified because no API key was available. Real-world decision quality is not validated.
+- Frontend has separate reimbursement import, both charge formats, contract verdict labels, and counts.
+- MySQL retained by user choice. Application organization scoping is not equivalent to the mandatory DB-enforced RLS requirement in RULES.md; MySQL cannot provide that PostgreSQL-style RLS.
+- Checks: 10 focused Gemini-provider/reimbursement-matcher unit tests passed; earlier parser tests (14) passed; frontend TypeScript lint and production build passed; upload page rendered at http://localhost:3000/.
+- The DB-backed integration test was added but not run because the test process does not have the backend session's DB credentials. Restart the backend in its credentialed PowerShell session to load the new API/schema.
+- No .git metadata is present in this workspace, so there is no git status/diff and no commit was made.
+
+The historical notes below do not override this latest status.
+
+Purpose
+-------
+This file records the current project state and the next actions for continuing work.
+Do not store real passwords or secrets in this file.
+
+Project
+-------
+Repository root:
+E:\sydon rcm pro\cube26-rcy-0162-nithesh33758-main
+
+Backend:
+- Java + Spring Boot project in backend
+- Spring Boot version: 4.0.8
+- Project Java target: Java 25
+- MySQL is the intended local database
+- Backend port: 8080
+
+Frontend:
+- React + TypeScript + Vite project in recovery-manager
+- Frontend dev port: 3000
+- Upload and analysis screens call real backend endpoints
+- Dashboard, review, analytics, and upstream evidence browsing still contain mock data
+
+Completed / Verified
+--------------------
+1. Confirmed the official input CSV contract from data/README.md and data/sample_input.csv.
+   Required columns:
+   line_id, report_type, unit_id, org_id, sku, fnsku, fba_shipment_id,
+   order_id, charge_type, quantity, amount_usd, posted_date
+
+2. MySQL was selected instead of the earlier default database setup.
+
+3. MySQL was verified reachable on 127.0.0.1:3306 at an earlier point.
+
+4. Maven was found installed at:
+   C:\Program Files\apache-maven-3.9.11-bin\apache-maven-3.9.11\bin\mvn.cmd
+
+5. Java 25 was installed and verified:
+   java version "25.0.4.1"
+
+6. The backend was successfully verified at one point:
+   - TCP port 8080 returned True
+   - Java processes were running
+   - GET http://localhost:8080/v3/api-docs returned HTTP 200
+   This means a backend instance was running and responding at that time.
+
+Current Configuration
+---------------------
+backend/src/main/resources/application.properties currently contains:
+- MySQL URL from DB_URL, defaulting to localhost:3306/recovery_manager
+- DB_USERNAME with a recovery_app fallback
+- DB_PASSWORD from the environment; no password is stored in application.properties
+
+Important security follow-up:
+- Never commit or record the real password in the repository.
+- Use a local environment variable named DB_PASSWORD.
+
+Expected runtime variables
+--------------------------
+DB_URL=jdbc:mysql://localhost:3306/recovery_manager?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+DB_USERNAME=recovery_app
+DB_PASSWORD=<local MySQL password, do not write the real value here>
+
+Recent Problem
+--------------
+Some PowerShell sessions showed:
+- java -version works with Java 25
+- mvn fails with: The JAVA_HOME environment variable is not defined correctly
+
+The likely cause is that JAVA_HOME was set to C:\Program Files\Java\jdk-25, but the actual installed JDK folder name may be different. Verify the exact folder with:
+Get-ChildItem "C:\Program Files\Java"
+
+Then set JAVA_HOME to the exact JDK directory and add Maven to PATH for the current shell:
+$env:JAVA_HOME = "<exact Java 25 JDK folder>"
+$env:PATH = "$env:JAVA_HOME\bin;C:\Program Files\apache-maven-3.9.11-bin\apache-maven-3.9.11\bin;$env:PATH"
+
+Verify:
+Test-Path "$env:JAVA_HOME\bin\java.exe"
+Test-Path "$env:JAVA_HOME\bin\javac.exe"
+java -version
+mvn -version
+
+Do not use the placeholder password text "your_mysql_password" as an actual password. It was used in prior example commands only.
+
+Files already reviewed or relevant
+-----------------------------------
+- PROJECT_PROGRESS.txt
+- README.md
+- data/README.md
+- data/sample_input.csv
+- backend/pom.xml
+- backend/src/main/resources/application.properties
+- backend/.env.example
+- backend/src/main/java/com/cube/buildathon/recoverymanager/backend/BackendApplication.java
+- backend/src/main/java/com/cube/buildathon/recoverymanager/backend/config/PostgresRlsInitializer.java
+- backend/src/main/java/com/cube/buildathon/recoverymanager/backend/config/TenantDatabaseScope.java
+- recovery-manager/package.json
+- recovery-manager/src/App.tsx
+- recovery-manager/src/data/mockData.ts
+
+Frontend status
+---------------
+- recovery-manager/package.json has:
+  npm run dev -> vite --port=3000 --host=0.0.0.0
+  npm run build -> vite build
+  npm run lint -> tsc --noEmit
+- App.tsx initializes charges with generateFullDataset() from mockData.
+- ProcessingPipeline currently controls a prototype processing state.
+- The frontend now retains the selected browser File and calls the real backend upload/start/result endpoints.
+- The frontend maps returned backend charges into the existing results/investigation model.
+- TypeScript validation passes with npm.cmd run lint.
+- Production build passes with npm.cmd run build.
+- Vite was started successfully at http://localhost:3000/.
+- The existing Vite config emits a non-blocking __dirname/configLoader warning.
+
+Exact continuation plan
+-----------------------
+1. Restart the backend after setting the real DB_PASSWORD so the updated application.properties is loaded.
+2. Verify http://localhost:8080/v3/api-docs returns HTTP 200 after the restart.
+3. Use a real CSV file in the frontend and confirm POST /api/analysis/upload, POST /{analysisId}/start, and GET /{analysisId} complete successfully.
+4. Start the frontend if it is not already running:
+   cd "E:\sydon rcm pro\cube26-rcy-0162-nithesh33758-main\recovery-manager"
+   npm install
+   npm.cmd run dev
+5. Replace remaining mock dashboard, evidence, reviews, and analytics data with backend responses.
+6. Add focused backend and frontend integration tests.
+7. Validate the complete upload-to-dashboard workflow with sample_input.csv and upstream evidence.
+8. Prepare deployment configuration.
+
+Current stopping point
+----------------------
+Historical stopping point from 2026-09-28. The latest continuation point is described at the top of this file.

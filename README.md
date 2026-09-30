@@ -1,321 +1,372 @@
-# Cube Buildathon · 05 · Recovery Manager
+# Sydon Recovery Manager
 
-**Commerce Context stream · Round 2 · Individual Build**
+**CUBE Buildathon — Commerce Context Stream**
 
-> Five agents, one unit, one record that follows it.
-> A physical product arrives, gets prepped, gets shipped, comes back. At every step a person makes a fast judgment that nobody records. **You build the agent that makes one of those judgments, and leaves proof.**
+An automated, evidence-backed claims engine for Amazon FBA sellers. Recovery Manager ingests fee charge reports, cross-references each charge against upstream warehouse evidence from four operational managers, and produces deterministic CLAIM / REJECT / UNCERTAIN decisions — enabling sellers to recover erroneous fees with full audit traceability.
 
-**New here? Read these first:**
-
-1. [`GITHUB-GUIDE.md`](GITHUB-GUIDE.md) explains how to fork the repository, set it up, build and push your work.
-2. [`RULES.md`](RULES.md) covers the repository and engineering rules.
+**Live Demo:** [cube26-rcy-0162-nithesh33758.onrender.com](https://cube26-rcy-0162-nithesh33758.onrender.com)
 
 ---
 
-## Your problem statement: Recovery Manager
+## Table of Contents
 
-|                              |                                                          |
-| ---------------------------- | -------------------------------------------------------- |
-| **Position in the chain**    | Step 5 of 5. Money back. This step has no camera.        |
-| **Customer**                 | Anyone being charged fees they do not owe                |
-| **What gets recorded**       | Claim filed                                              |
-| **Who consumes your output** | The seller, and whoever reviews the claim at the channel |
+- [Problem Understanding](#problem-understanding)
+- [Solution Overview](#solution-overview)
+- [Setup Instructions](#setup-instructions)
+- [Usage Instructions](#usage-instructions)
+- [Assumptions & Limitations](#assumptions--limitations)
 
-Amazon charges inbound defect fees, loses units, damages inventory and mis-weighs parcels. Sellers are owed reimbursements they never claim, and charged fees they cannot contest, because contesting requires evidence and they have none. Today this is done by hand, by agencies taking a percentage, or not at all.
+---
 
-**This is not a vision agent.** No camera, no capture surface. It reads the evidence records the other four Managers produce, matches them against channel fee and reimbursement reports, and assembles a claim.
+## Problem Understanding
 
-* Ingest a fee or reimbursement report and parse the charges
-* Match each charge to the unit evidence covering it
-* Decide whether the evidence contradicts the charge, supports it, or is insufficient
-* Assemble a disputable claim with evidence attached and a dollar figure
-* State explicitly what it cannot claim, and why
+Amazon FBA sellers are frequently charged operational fees — inbound defect fees, lost-inbound adjustments, fulfilment weight-tier overcharges, damaged-in-warehouse deductions, and refund-issued-item-not-returned penalties. Many of these fees are erroneous: Amazon's automated systems apply charges even when the seller's upstream operational evidence proves compliance.
 
-> **Build against the official evidence contract.** Recovery depends on the evidence produced by the other four Managers. For Round 2, use the evidence contract provided by the organisers as the baseline rather than creating a separate cross-pod contract.
+**The core challenge:**
 
-> **Your eval is different.** Others measure a model against human labels on units. You measure claim correctness on charges, and you report precision, because a wrongly filed claim costs a seller standing with the channel while a missed one costs only money.
+1. **Volume:** A mid-size seller may receive thousands of charge line-items per month across dozens of fee categories.
+2. **Evidence Fragmentation:** The evidence needed to dispute a charge is scattered across four separate operational stages — **Receiving**, **Prep**, **Pack**, and **Returns** — each managed independently.
+3. **Manual Review Bottleneck:** Today, sellers (or third-party recovery services) manually cross-reference each charge against warehouse logs, labeling records, and shipment manifests. This is slow, error-prone, and doesn't scale.
+4. **Duplicate Claim Risk:** Without tracking already-paid reimbursements, sellers risk filing duplicate disputes, which damages their standing with Amazon.
+5. **Audit Traceability:** Amazon requires evidence-backed justifications for every claim. Decisions made without traceable reasoning are rejected or penalized.
 
-### The chain you are part of
+**In short:** Sellers are leaving money on the table because the evidence exists to dispute erroneous fees, but the reconciliation process is too manual, too fragmented, and too risky to perform at scale.
 
-```text
- Supplier delivery      Inbound to Amazon     Outbound to buyer     Customer return        Money back
- ┌──────────────┐      ┌──────────────┐      ┌──────────────┐      ┌──────────────┐      ┌──────────────┐
- │ 01 Receiving │ ───▶ │ 02 Prep      │ ───▶ │ 03 Pack      │ ───▶ │ 04 Returns   │      │ 05 Recovery  │
- │ condition on │      │ compliance   │      │ contents at  │      │ condition &  │      │ reads all    │
- │ arrival      │      │ proof        │      │ seal         │      │ disposition  │      │ four → claim │
- └──────┬───────┘      └──────┬───────┘      └──────┬───────┘      └──────┬───────┘      └──────▲───────┘
-        └─────────────────────┴─────────────────────┴─────────────────────┴─────────────────────┘
+---
+
+## Solution Overview
+
+Sydon Recovery Manager automates the end-to-end fee reconciliation pipeline through a deterministic, rule-based decision engine with full evidence traceability.
+
+### Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        Frontend (React + Vite)                  │
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌────────┐ ┌────────┐  │
+│  │ Charges  │ │Dashboard │ │ Evidence │ │Reviews │ │Analtic │  │
+│  │  Upload  │ │ Overview │ │ Explorer │ │ Queue  │ │  -ics  │  │
+│  └──────────┘ └──────────┘ └──────────┘ └────────┘ └────────┘  │
+└───────────────────────┬─────────────────────────────────────────┘
+                        │  REST API (/api/*)
+┌───────────────────────▼─────────────────────────────────────────┐
+│                   Backend (Spring Boot + Java 25)                │
+│                                                                 │
+│  ┌────────────────────────────────────────────────────────────┐  │
+│  │              7-Step Analysis Pipeline                      │  │
+│  │  1. Read Charges → 2. Validate Schema → 3. Match Units    │  │
+│  │  4. Retrieve Evidence → 5. Check Requirements             │  │
+│  │  6. Generate Decisions → 7. Finalize Results              │  │
+│  └────────────────────────────────────────────────────────────┘  │
+│                                                                 │
+│  ┌──────────────────────┐  ┌────────────────────────────────┐   │
+│  │ RuleBasedDecision    │  │ EvidenceImportService          │   │
+│  │ Provider             │  │ (4-Manager Evidence Loader)    │   │
+│  │ (Deterministic Logic)│  │ Receiving│Prep│Pack│Returns    │   │
+│  └──────────────────────┘  └────────────────────────────────┘   │
+│                                                                 │
+│  ┌──────────────────────┐  ┌────────────────────────────────┐   │
+│  │ H2 / PostgreSQL DB   │  │ Tenant Isolation (org_id)      │   │
+│  └──────────────────────┘  └────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────┘
+                        │
+┌───────────────────────▼─────────────────────────────────────────┐
+│               AI Model (Python + FastAPI) — Optional            │
+│  ┌────────────────┐  ┌────────────────┐  ┌──────────────────┐   │
+│  │ model_runtime  │  │evidence_adapter│  │  amazon_rules    │   │
+│  │   .py          │  │   .py          │  │   .json          │   │
+│  └────────────────┘  └────────────────┘  └──────────────────┘   │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
-The first four are the same machine: a camera, a model, and a decision bound to a record. What changes is the ruleset, the buyer and the moment. The fifth has no camera. It turns the other four's records into a claim.
+### Key Components
 
-Your output has to be usable by another pod. That's deliberate, and it's scored.
+| Component | Technology | Purpose |
+|---|---|---|
+| **Frontend** | React 19, Vite 8, TypeScript, TailwindCSS 4 | Upload panel, charge ledger, dashboard, evidence explorer, review queue, analytics |
+| **Backend** | Spring Boot, Java 25, Maven | 7-step analysis pipeline, REST API, schema validation, tenant isolation |
+| **Decision Engine** | `RuleBasedDecisionProvider.java` | Deterministic charge-to-evidence matching using Amazon FBA recovery rules |
+| **Evidence Store** | CSV fixtures (Receiving, Prep, Pack, Returns) | Upstream operational evidence indexed by unit ID |
+| **Database** | H2 (dev/demo) / PostgreSQL (production) | Persists charges, evidence records, decisions, and reimbursement history |
+| **AI Model** *(optional)* | Python, FastAPI, Transformers | Alternative LLM-based decision provider (not used by default) |
+
+### Decision Logic
+
+The rule-based engine evaluates each charge type against specific evidence requirements:
+
+| Charge Type | Evidence Required | CLAIM Condition | REJECT Condition |
+|---|---|---|---|
+| `inbound_defect_fee` | Prep (FNSKU label, polybag, barcode) | All prep checks PASS before charge date | Any prep check FAIL |
+| `lost_inbound` | Receiving (quantity match) | Shipped quantity matches received quantity | Quantity mismatch confirmed |
+| `damaged_in_warehouse` | Receiving (undamaged at receipt) | Unit was undamaged on receipt | Damage existed at receipt |
+| `refund_issued_item_not_returned` | Returns (completeness, identity) | Return completeness PASS | Completeness FAIL or item missing |
+| `fulfilment_fee_weight_tier` | Prep + Receiving (packaging compliance) | Packaging and labeling compliance PASS | Non-compliance detected |
+
+If evidence is **missing** or **inconclusive**, the charge is marked **UNCERTAIN** and routed to the human review queue.
 
 ---
 
-## Reference data
+## Setup Instructions
 
-`data/` holds a **dummy** CSV for reference while you design and build. Its columns and meanings are listed in [`data/README.md`](data/README.md).
+### Prerequisites
 
-**The data is synthetic.** The SKUs, ASINs, FNSKUs, orders, suppliers, operators and amounts are all invented. The requirement flags and fee amounts are **not** Amazon's real rules or fees. Engineering rule 5 applies: look the authoritative rule up. The `photo_refs` paths are placeholders, and no images ship with this repo. Your fixtures and eval set are yours to capture.
+| Tool | Version | Purpose |
+|---|---|---|
+| **Java JDK** | 25+ | Spring Boot backend |
+| **Maven** | 3.9+ | Backend build |
+| **Node.js** | 22+ | React frontend |
+| **npm** | 10+ | Frontend dependency management |
+| **Python** | 3.11+ | AI model service (optional) |
+| **Docker** | 24+ | Container deployment (optional) |
 
-All five buildathon repos share the same `unit_id` values (`UNIT-0001` … `UNIT-0100`). You can follow one unit from receiving through recovery, the same way the real records will be joined. In the sample, each unit takes one route: **FBA** (prep, then Amazon ships it and charges fees) or **merchant-fulfilled / 3PL** (the seller packs it). So a unit has a Prep record or a Pack record, never both.
+### Option 1: Local Development
 
-Recovery also gets `data/upstream/`, a copy of the other four files, so you can practise the join before Round 3 integration.
+#### 1. Clone the Repository
 
----
-
-## How this works
-
-You have a defined problem statement, supporting domain information and an engineering repository to build from. Understand the customer and operational workflow before writing code, then build and measure whether the solution works.
-
-Your goal is to turn the Recovery Manager problem into a working, measurable agent.
-
-### What you're given
-
-* This problem statement
-* A domain brief covering the real economics, fee structures and what a working day in a warehouse looks like *(shared by the organisers)*
-* The engineering rules in [`RULES.md`](RULES.md)
-* Repository data and supporting resources
-* One fully worked package for Returns Manager (customer letter, PR/FAQ, one-pager) as a reference for the standard expected. **Read it. Don't copy it.**
-
-### What you produce
-
-Build your solution in **your own GitHub fork**.
-
-Your final Round 2 submission should include:
-
-* A working Recovery Manager
-* A `README.md` explaining your solution, setup, assumptions and limitations
-* An `ARCHITECTURE.md`
-* An eval report/results with numbers and named failure modes
-* A working demo/video
-* A deployment URL, where applicable
-* Your mandatory LinkedIn post URL
-
-## Build and submission flow
-
-```text
-Understand
-    ↓
-Build
-    ↓
-Test
-    ↓
-Evaluate
-    ↓
-Document
-    ↓
-Demo / Deploy
-    ↓
-Submit
+```bash
+git clone <repository-url>
+cd recovery-manager-fork-clean
 ```
 
-Round 2 is an **individual build**.
+#### 2. Start the Backend
 
-The official build phase begins on **25 September 2026 at 9:00 AM IST**.
+```bash
+cd backend
 
-Submissions open from **27 September 2026**.
+# Copy environment variables
+cp .env.example .env
 
-The final submission deadline is **1 October 2026 at 6:00 PM IST**.
-
-The submission form closes permanently at the deadline. **There is no resubmission.**
-
-All code commits forming your Round 2 submission must be made during the authorised build phase. Do not continue making Round 2 code changes after the build phase ends.
-
----
-
-## Evaluation
-
-Recovery Manager is evaluated differently from the vision-based Managers.
-
-The primary question is:
-
-> **When Recovery Manager recommends a claim, is that claim actually supported by the available evidence?**
-
-Your evaluation should focus on:
-
-* charge/report parsing,
-* charge-to-unit matching,
-* upstream evidence matching,
-* evidence interpretation,
-* claim correctness,
-* claim precision,
-* uncertainty/review handling,
-* false claims and missed recoverable claims,
-* important failure modes.
-
-Report the methodology clearly.
-
-### Primary metric
-
-```text
-Claim Precision
-=
-Correctly Supported Claims
---------------------------
-All Claims Recommended
+# Build and run (uses embedded H2 database by default)
+mvn clean package -DskipTests
+java -jar target/recovery-manager-backend-*.jar
 ```
 
-Where measurable, also report:
+The backend starts on **http://localhost:8081** with an embedded H2 database (no external DB setup needed for development).
 
-* total charges evaluated,
-* claims recommended,
-* correctly supported claims,
-* incorrectly recommended claims,
-* missed recoverable claims,
-* `UNCERTAIN` / review rate,
-* latency/cost where relevant.
+#### 3. Start the Frontend
 
----
+```bash
+cd recovery-manager
 
-## Round 2 Evaluation — 100 Points
+# Install dependencies
+npm install
 
-| Criterion                                    |  Points |
-| -------------------------------------------- | ------: |
-| Problem Understanding & Solution Relevance   |  **15** |
-| Agent Functionality & Decision Quality       |  **25** |
-| Evaluation, Accuracy & Uncertainty Handling  |  **25** |
-| Evidence, Traceability & Engineering Quality |  **20** |
-| UX, Demo & Documentation                     |  **15** |
-| **TOTAL**                                    | **100** |
+# Create environment file
+echo "VITE_API_BASE_URL=http://localhost:8081" > .env
 
-For Recovery Manager, the evaluation focus is on **claim correctness and evidence quality**, not image-level accuracy.
-
----
-
-## Evidence and decision traceability
-
-Your Recovery Manager should make the claim traceable to the evidence that supports it.
-
-At minimum, the workflow should make it possible to understand:
-
-```text
-Charge
-   ↓
-Unit
-   ↓
-Upstream Evidence
-   ↓
-Evidence Interpretation
-   ↓
-Claim Decision
-   ↓
-Supporting Evidence
+# Start dev server
+npm run dev
 ```
 
-Use the official evidence contract provided by the organisers as the baseline for interoperability.
+The frontend starts on **http://localhost:3000** and proxies API requests to the backend.
 
-Do not create a separate negotiated evidence schema for Round 2.
+#### 4. (Optional) Start the AI Model Service
 
----
+```bash
+cd "AI model"
 
-## PASS · FAIL · UNCERTAIN
+# Create virtual environment
+python -m venv .venv
 
-For upstream checks and evidence states:
+# Activate (Windows)
+.\.venv\Scripts\Activate.ps1
+# Activate (macOS/Linux)
+# source .venv/bin/activate
 
-* **PASS** — the evidence supports the condition.
-* **FAIL** — the evidence shows the condition is not met.
-* **UNCERTAIN** — the evidence is insufficient for a reliable judgment.
+# Install dependencies
+pip install -r requirements.txt
 
-`UNCERTAIN` is not simply a low-confidence PASS.
-
-For Recovery, missing, contradictory or insufficient evidence should lead to an appropriate review/uncertain outcome rather than an unsupported claim.
-
----
-
-## Engineering expectations
-
-* **Tenancy isolation:** If you store persistent data, keep organisation/client data properly isolated.
-* **Batch model calls:** Avoid unnecessary repeated model calls.
-* **Fail open:** A model or dependency failure should not silently discard incoming information. Preserve the available information and move the case into an appropriate pending/review state.
-* **Authoritative rules:** Where an external rule is required, use the authoritative source rather than relying on model memory or synthetic sample values.
-* **Evidence traceability:** Preserve the records used to support recovery decisions.
-
----
-
-## What we're being straight with you about
-
-* **The core assumption is untested.** Nobody knows yet whether the evidence produced by automated upstream Managers will be reliable enough to support recovery claims at scale. Finding out that an assumption does not hold, and documenting that clearly, counts as a useful outcome.
-* **Nobody has spoken to a customer yet.** If you can get a real prep center or seller on a call, ask them to rank the five problems by urgency. Don't ask whether they'd buy what you're building.
-* **The background documents disagree in places.** A contradiction is a finding. Raise it as an Issue labelled `finding`.
-
----
-
-## Submission
-
-### Submissions open
-
-**27 September 2026**
-
-### Final deadline
-
-**1 October 2026 · 6:00 PM IST**
-
-The submission form closes permanently at the deadline.
-
-**There is no reopening and no resubmission.**
-
-Your final submission should include:
-
-* your GitHub fork,
-* working Recovery Manager,
-* `README.md`,
-* `ARCHITECTURE.md`,
-* evaluation results,
-* demo video,
-* deployment URL where applicable,
-* LinkedIn post URL.
-
-### LinkedIn — Mandatory
-
-Publish a LinkedIn post about your Round 2 build.
-
-The post must:
-
-* mention your Recovery Manager build,
-* explain what you built,
-* tag **CodeQuesters**,
-* tag **Sydon.AI**.
-
-Include the LinkedIn post URL in the submission form.
-
----
-
-## Commit rule
-
-All code commits forming your Round 2 submission must be made during the authorised build phase.
-
-Round 2 begins:
-
-**25 September 2026 · 9:00 AM IST**
-
-Once the build phase ends, do not continue making Round 2 code changes.
-
----
-
-## Round 2 → Round 3
-
-Round 2 is about your **individual Recovery Manager**.
-
-Participants selected for Round 3 will work in five-person Pods combining:
-
-```text
-Receiving Manager
-+
-Prep Manager
-+
-Pack Manager
-+
-Returns Manager
-+
-Recovery Manager
+# Start the service
+python app.py
 ```
 
-The objective is to integrate the five specialised agents into one connected end-to-end commerce system.
+The AI service starts on **http://localhost:8090**. The backend will automatically use it if `LOCAL_AI_URL` is configured.
 
-Your Round 2 implementation should therefore have clear outputs, structured evidence and an understandable interface for downstream integration.
+### Option 2: Docker (Production)
+
+```bash
+# Build and run the full application
+docker build -t sydon-recovery-manager .
+docker run -p 8080:8080 \
+  -e DEFAULT_ORG_ID=org_demo_alpha \
+  -e FRONTEND_ORIGINS="*" \
+  sydon-recovery-manager
+```
+
+The Docker image is a multi-stage build that:
+1. Compiles the React frontend with Vite
+2. Builds the Spring Boot backend with Maven
+3. Bundles the frontend assets into the backend's static resources
+4. Runs as a single self-contained JAR
+
+Access the application at **http://localhost:8080**.
+
+### Option 3: Render (Cloud Deployment)
+
+The project includes a `render.yaml` for one-click deployment on Render:
+
+```bash
+# Deploy using Render CLI or connect the GitHub repo
+# The render.yaml auto-configures:
+#   - Docker build from Dockerfile
+#   - Port: 10000
+#   - Region: Oregon
+#   - Free tier plan
+```
+
+### Environment Variables Reference
+
+| Variable | Default | Description |
+|---|---|---|
+| `PORT` / `SERVER_PORT` | `8081` | Server port |
+| `DEFAULT_ORG_ID` | `org_demo_alpha` | Default tenant organization |
+| `FRONTEND_ORIGINS` | `http://localhost:3000` | CORS allowed origins |
+| `DB_URL` | `jdbc:h2:file:./data/recovery_db` | Database connection URL |
+| `DB_USERNAME` | `sa` | Database username |
+| `DB_PASSWORD` | *(empty)* | Database password |
+| `LOCAL_AI_URL` | `http://127.0.0.1:8000/v1/analyze-unit` | AI model service endpoint |
 
 ---
 
-*Cube Buildathon · Commerce Context*
+## Usage Instructions
+
+### Step 1: Upload a Fee Report
+
+1. Navigate to the **Charges** tab.
+2. Drag and drop a CSV file or click **Choose CSV File**.
+3. The system auto-detects the schema format:
+   - **Normalized charge report** — requires: `charge_id`, `charge_type`, `charge_subtype`, `charged_at`, `granularity`, `quantity`, `currency`, `amount_total`, `description`
+   - **Legacy charge ledger** — requires: `line_id`, `report_type`, `unit_id`, `org_id`, `sku`, `fnsku`, `fba_shipment_id`, `order_id`, `charge_type`, `quantity`, `amount_usd`, `posted_date`
+4. The validator confirms schema integrity (e.g., "12/12 Columns Valid").
+
+**Sample data:** Use `data/fee_report_sample.csv` (60 rows across 5 fee types) to test the full workflow.
+
+### Step 2: Import Reimbursements (Optional)
+
+Before analysis, import your existing reimbursements CSV via the **Import Reimbursement CSV** button to suppress duplicate claim recommendations.
+
+### Step 3: Run Analysis
+
+1. Click **Start Analysis** to trigger the 7-step pipeline.
+2. Watch the real-time progress tracker:
+   - Reading charges → Validating report → Matching units → Retrieving upstream evidence → Checking requirements → Generating decisions → Finalizing results
+3. The analysis completes in seconds for datasets up to 50,000 rows.
+
+### Step 4: Review Results
+
+- **Charges Tab** — Full charge ledger with CLAIM / REJECT / UNCERTAIN decisions, filterable by decision type and fee category.
+- **Dashboard Tab** — Recovery snapshot, decision overview visualization, and human review queue.
+- **Evidence Tab** — Unified Evidence Master Ledger with all telemetry logs, filterable by source manager (Receiving, Prep, Pack, Returns) and evidence status (PASS, FAIL, UNCERTAIN).
+- **Reviews Tab** — Detailed review cards for uncertain charges, showing discrepancy notes, evidence gaps, and inspection links.
+- **Analytics Tab** — Operational KPIs, claim precision metrics, and charge breakdown by type with claim rates.
+
+### Step 5: Export Results
+
+Click **Export Recovery CSV** to download the complete analysis — every charge ID, decision, evidence count, and status — ready for claim filing or operational review.
+
+### API Endpoints
+
+| Endpoint | Method | Description |
+|---|---|---|
+| `/api/charges/upload` | `POST` | Upload a charge report CSV |
+| `/api/charges/analyze` | `POST` | Start analysis pipeline |
+| `/api/charges/results` | `GET` | Fetch analysis results |
+| `/api/evidence` | `GET` | Query evidence records |
+| `/api/reimbursements/upload` | `POST` | Import reimbursement history |
+| `/v3/api-docs` | `GET` | OpenAPI specification |
+| `/swagger-ui.html` | `GET` | Swagger UI documentation |
+
+---
+
+## Assumptions & Limitations
+
+### Assumptions
+
+1. **Evidence Pre-existence:** The system assumes upstream evidence from all four managers (Receiving, Prep, Pack, Returns) is pre-loaded as CSV fixtures in `data/upstream/`. In a production environment, these would be fetched via API from each operational manager.
+
+2. **Charge Type Coverage:** The rule-based decision engine covers five Amazon FBA fee types:
+   - `inbound_defect_fee`
+   - `lost_inbound`
+   - `damaged_in_warehouse`
+   - `refund_issued_item_not_returned`
+   - `fulfilment_fee_weight_tier`
+
+   Charges outside these types receive an UNCERTAIN decision with a note for manual review.
+
+3. **Single Currency:** The system assumes all charges are in **USD**. Multi-currency reconciliation is not supported in this version.
+
+4. **Organization-Scoped:** Each analysis is scoped to a single `org_id`. The system enforces tenant isolation — rows with mismatched organization IDs are rejected from the analysis and surfaced as validation warnings.
+
+5. **No Auto-Filing:** The system **does not** automatically file claims with Amazon. It produces recommendations (CLAIM / REJECT / UNCERTAIN) that a human operator reviews before taking action. This is a deliberate design choice to prevent erroneous automated filings.
+
+6. **Deterministic Decisions:** The default `RuleBasedDecisionProvider` uses deterministic logic (no ML/LLM). Decisions are fully reproducible given the same input data and evidence.
+
+### Limitations
+
+1. **Evidence Fixture Mode:** In the current buildathon implementation, evidence data is loaded from static CSV files (`data/upstream/receiving_sample.csv`, `prep_sample.csv`, `pack_sample.csv`, `returns_sample.csv`). A production version would integrate with live upstream manager APIs.
+
+2. **No Historical Trending:** Analytics are computed per-analysis session. There is no cross-session trending, historical comparison, or time-series dashboards.
+
+3. **Review-Only Audit Trail:** The Reviews tab displays uncertain charges for inspection but does **not** persist auditor override decisions. The backend decision remains unchanged after review. This is intentional for auditability but limits the current review workflow.
+
+4. **AI Model is Optional:** The Python-based AI model (`AI model/`) provides an alternative LLM-based decision path but is **not used by default**. The production decision engine is the Java `RuleBasedDecisionProvider`, which avoids LLM hallucination risks.
+
+5. **Database:** The demo deployment uses an embedded **H2 database**, which is suitable for single-instance demos but not for production workloads. PostgreSQL is supported and recommended for production use (see `.env.example`).
+
+6. **File Size Limit:** CSV uploads are capped at **25 MB** (~50,000 rows). Reports exceeding this limit must be split before upload.
+
+7. **Browser Compatibility:** The frontend is built with React 19 and modern CSS. It requires a modern browser (Chrome 90+, Firefox 88+, Edge 90+, Safari 15+).
+
+---
+
+## Tech Stack Summary
+
+| Layer | Technologies |
+|---|---|
+| **Frontend** | React 19, TypeScript 7, Vite 8, TailwindCSS 4, Lucide Icons, Motion |
+| **Backend** | Java 25, Spring Boot, Maven, JPA/Hibernate, H2/PostgreSQL |
+| **AI Model** | Python, FastAPI, Uvicorn, Transformers, Accelerate |
+| **Deployment** | Docker (multi-stage), Render (cloud) |
+| **Data** | CSV ingestion, structured evidence fixtures, OpenAPI 3.0 |
+
+---
+
+## Project Structure
+
+```
+recovery-manager-fork-clean/
+├── backend/                    # Spring Boot backend (Java 25)
+│   ├── src/main/java/          # Application source code
+│   │   └── .../backend/
+│   │       ├── ai/             # Decision engine (RuleBasedDecisionProvider)
+│   │       ├── controller/     # REST API controllers
+│   │       ├── model/          # JPA entities
+│   │       ├── repository/     # Data access layer
+│   │       └── service/        # Business logic & analysis pipeline
+│   └── src/main/resources/     # Configuration & static assets
+├── recovery-manager/           # React frontend (Vite + TypeScript)
+│   ├── src/
+│   │   ├── components/         # UI components (ChargeTable, Dashboard, etc.)
+│   │   ├── services/           # API client services
+│   │   └── App.tsx             # Root application component
+│   └── package.json
+├── AI model/                   # Python AI service (optional)
+│   ├── model_runtime.py        # Inference engine
+│   ├── evidence_adapter.py     # Evidence parsing & matching
+│   ├── schemas.py              # Data contracts
+│   └── amazon_rules.json       # Amazon FBA recovery rule definitions
+├── data/                       # Sample data & evidence fixtures
+│   ├── upstream/               # Evidence CSVs (receiving, prep, pack, returns)
+│   └── fee_report_sample.csv   # Sample charge report for testing
+├── Dockerfile                  # Multi-stage production build
+├── render.yaml                 # Render cloud deployment config
+└── README.md                   # This file
+```
+
+---
+
+## License
+
+Built for the CUBE Buildathon — Commerce Context Stream.
+
+**Team Sydon**

@@ -1,0 +1,5 @@
+line_id,report_type,unit_id,org_id,sku,fnsku,fba_shipment_id,order_id,charge_type,quantity,amount_usd,posted_date
+DEMO-CHG-001,fee_report,UNIT-0014,org_demo_alpha,SKU-LAMP-LED,X00DUMMY014,FBA-DUMMY-101,ORD-DUMMY-50014,inbound_defect_fee,1,2.00,2026-07-18
+DEMO-CHG-002,inventory_adjustment,UNIT-0064,org_demo_alpha,SKU-BOTTLE-750,X00DUMMY064,FBA-DUMMY-106,,lost_inbound,1,15.00,2026-07-20
+DEMO-CHG-003,fee_report,UNIT-0004,org_demo_alpha,SKU-PROT-1KG,X00DUMMY004,FBA-DUMMY-100,,damaged_in_warehouse,1,8.50,2026-07-19
+DEMO-CHG-004,fee_report,UNIT-0038,org_demo_alpha,SKU-PROT-1KG,X00DUMMY038,FBA-DUMMY-103,ORD-DUMMY-50038,refund_issued_item_not_returned,1,12.00,2026-07-20

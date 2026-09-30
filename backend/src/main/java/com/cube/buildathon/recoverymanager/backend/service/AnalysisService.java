@@ -24,6 +24,8 @@ import com.cube.buildathon.recoverymanager.backend.repository.EvidenceRepository
 import com.cube.buildathon.recoverymanager.backend.repository.RequirementRepository;
 import com.cube.buildathon.recoverymanager.backend.repository.ReimbursementRepository;
 import com.cube.buildathon.recoverymanager.backend.repository.ValidationIssueRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -35,6 +37,7 @@ import java.util.Map;
 
 @Service
 public class AnalysisService {
+    private static final Logger LOGGER = LoggerFactory.getLogger(AnalysisService.class);
         private static final String AI_UNAVAILABLE_REASON =
             "Authoritative rules and contracted evidence are not configured; manual review is required.";
 
@@ -118,6 +121,7 @@ public class AnalysisService {
                     suggestions = Map.of();
                 }
             } catch (RuntimeException exception) {
+                LOGGER.warn("Local decision provider failed during analysis", exception);
                 suggestions = Map.of();
                 providerFailed = true;
             }
@@ -125,13 +129,12 @@ public class AnalysisService {
             List<Decision> decisions = new ArrayList<>();
             for (Charge charge : charges) {
                 if (reimbursedChargeIds.contains(charge.getLineId())) {
-                    decisions.add(createDecision(charge, DecisionType.ALREADY_REIMBURSED,
-                            "A matching reimbursement covers this charge; duplicate claim suppressed."));
+                    decisions.add(createDecision(charge, DecisionType.REJECT,
+                            "A matching reimbursement covers this charge; duplicate claim suppressed (Reject)."));
                     continue;
                 }
                 DecisionSuggestion suggestion = suggestions.get(charge.getLineId());
-                DecisionType decisionType = suggestion == null || suggestion.decision() == null
-                        ? DecisionType.UNCERTAIN : suggestion.decision();
+                DecisionType decisionType = normalizeDecision(suggestion == null ? null : suggestion.decision());
                 String reason = suggestion == null || suggestion.reason() == null || suggestion.reason().isBlank()
                         ? AI_UNAVAILABLE_REASON : suggestion.reason();
                 decisions.add(createDecision(charge, decisionType, reason));
@@ -170,19 +173,20 @@ public class AnalysisService {
         List<Charge> charges = chargeRepository.findByOrgIdAndAnalysisRun_AnalysisIdOrderByPostedDateDescLineIdAsc(
                 orgId, analysisId);
         List<ChargeResponse> chargeResponses = charges.stream().map(chargeResponseMapper::toResponse).toList();
-        long uncertain = count(orgId, analysisId, DecisionType.UNCERTAIN)
-            + count(orgId, analysisId, DecisionType.INSUFFICIENT_EVIDENCE);
+        long claims = count(orgId, analysisId, DecisionType.CLAIM);
+        long rejected = count(orgId, analysisId, DecisionType.REJECT);
+        long uncertain = count(orgId, analysisId, DecisionType.UNCERTAIN);
         AnalysisSummaryResponse summary = new AnalysisSummaryResponse(
                 charges.size(),
-            count(orgId, analysisId, DecisionType.CLAIM) + count(orgId, analysisId, DecisionType.CONTESTED),
-            count(orgId, analysisId, DecisionType.REJECT) + count(orgId, analysisId, DecisionType.ACCEPTED),
-            uncertain,
-            count(orgId, analysisId, DecisionType.PENDING_REVIEW),
-            count(orgId, analysisId, DecisionType.CONTESTED),
-            count(orgId, analysisId, DecisionType.ACCEPTED),
-            count(orgId, analysisId, DecisionType.INSUFFICIENT_EVIDENCE),
-            count(orgId, analysisId, DecisionType.ALREADY_REIMBURSED),
-            count(orgId, analysisId, DecisionType.OUT_OF_WINDOW));
+                claims,
+                rejected,
+                uncertain,
+                uncertain,
+                claims,
+                rejected,
+                uncertain,
+                0,
+                0);
         List<RowValidationError> validationErrors = validationIssueRepository
                 .findByOrgIdAndAnalysisRun_AnalysisIdOrderByRowNumberAscIdAsc(orgId, analysisId)
                 .stream().map(this::toRowError).toList();
@@ -290,5 +294,16 @@ public class AnalysisService {
 
     private String emptyToNull(String value) {
         return value == null || value.isBlank() ? null : value.trim();
+    }
+
+    private DecisionType normalizeDecision(DecisionType type) {
+        if (type == null) {
+            return DecisionType.UNCERTAIN;
+        }
+        return switch (type) {
+            case CLAIM, CONTESTED -> DecisionType.CLAIM;
+            case REJECT, ACCEPTED, ALREADY_REIMBURSED, OUT_OF_WINDOW -> DecisionType.REJECT;
+            default -> DecisionType.UNCERTAIN;
+        };
     }
 }

@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Check, Loader2, ArrowRight } from 'lucide-react';
 
 interface ProcessingPipelineProps {
+  totalRows: number;
   onComplete: () => void;
   onError: () => void;
   simulateError?: boolean;
@@ -18,54 +19,54 @@ const STEPS: Step[] = [
   {
     id: 1,
     label: 'Reading charges',
-    description: 'Ingesting tabular data and parsing 320 ledger records',
-    detail: 'Normalized currency tokens and SKU references'
+    description: 'Preparing the uploaded CSV for backend analysis.',
+    detail: 'Uploaded report sent to the backend.'
   },
   {
     id: 2,
     label: 'Validating report',
-    description: 'Verifying schema integrity and date ranges',
-    detail: 'All 12 contractual ledger header signatures confirmed'
+    description: 'Validating the report structure and rows.',
+    detail: 'Backend validation completed.'
   },
   {
     id: 3,
     label: 'Matching units',
-    description: 'Correlating unit IDs with warehouse catalog entries',
-    detail: 'Cross-referenced 320 unit serials across FC inventory maps'
+    description: 'Grouping uploaded charges for analysis.',
+    detail: 'Charges grouped by the backend.'
   },
   {
     id: 4,
     label: 'Retrieving upstream evidence',
-    description: 'Querying Receiving, Prep, Pack, and Returns managers',
-    detail: 'Aggregated 960 physical telemetry events and sensor logs'
+    description: 'Loading evidence associated with the charges.',
+    detail: 'Backend evidence lookup completed.'
   },
   {
     id: 5,
     label: 'Checking requirements',
-    description: 'Evaluating receiving tare, SLA timers, and damage logs',
-    detail: 'Evaluated 12 contractual dispute clauses'
+    description: 'Loading applicable requirements for each charge.',
+    detail: 'Backend requirement lookup completed.'
   },
   {
     id: 6,
     label: 'Generating decisions',
-    description: 'Computing recovery confidence vectors and variance deltas',
-    detail: 'Classified CLAIM, REJECT, and UNCERTAIN boundaries'
+    description: 'Applying the configured decision provider.',
+    detail: 'Backend decisions completed.'
   },
   {
     id: 7,
     label: 'Finalizing results',
-    description: 'Compiling audit dossier and recovery summary ledger',
-    detail: 'Indexing evidence trails and generating recovery docket'
+    description: 'Retrieving the completed analysis response.',
+    detail: 'Loading backend summary and charge results.'
   }
 ];
 
 export const ProcessingPipeline: React.FC<ProcessingPipelineProps> = ({
+  totalRows,
   onComplete,
   onError,
   simulateError = false
 }) => {
   const [currentStepIndex, setCurrentStepIndex] = useState(0);
-  const [recordsProcessed, setRecordsProcessed] = useState(0);
 
   useEffect(() => {
     // If simulateError is true, fail on step 4
@@ -93,12 +94,6 @@ export const ProcessingPipeline: React.FC<ProcessingPipelineProps> = ({
       return () => clearTimeout(completeTimer);
     }
   }, [currentStepIndex, simulateError, onComplete, onError]);
-
-  // Simulating incrementing record count
-  useEffect(() => {
-    const targetRecords = Math.min(320, Math.floor(((currentStepIndex + 1) / STEPS.length) * 320));
-    setRecordsProcessed(targetRecords);
-  }, [currentStepIndex]);
 
   return (
     <div className="max-w-3xl mx-auto px-6 py-14">
@@ -133,10 +128,10 @@ export const ProcessingPipeline: React.FC<ProcessingPipelineProps> = ({
 
         <div className="text-right sm:border-l sm:border-[#E2DFD7] sm:pl-6">
           <span className="text-xs font-mono uppercase text-[#737067] block mb-0.5">
-            Progress
+            Rows in report
           </span>
           <span className="font-heading text-lg font-bold text-[#151515] tabular-nums">
-            {recordsProcessed} / 320 charges
+            {totalRows} charges
           </span>
         </div>
       </div>
@@ -210,12 +205,12 @@ export const ProcessingPipeline: React.FC<ProcessingPipelineProps> = ({
 
       {/* Subtle testing convenience control */}
       <div className="mt-6 flex items-center justify-between text-xs text-[#737067]">
-        <span>Simulating deterministic audit pipeline</span>
+        <span>Analysis is running on the backend</span>
         <button
           onClick={onComplete}
           className="hover:text-[#151515] underline cursor-pointer text-xs font-mono"
         >
-          Fast-Forward to Results →
+          Check for results →
         </button>
       </div>
     </div>

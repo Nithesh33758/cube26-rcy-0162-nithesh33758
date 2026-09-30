@@ -13,7 +13,6 @@ import {
   MapPin,
   Barcode,
   Layers,
-  FileCheck,
   Check,
   Copy,
   Download
@@ -34,7 +33,6 @@ export const ChargeInvestigation: React.FC<ChargeInvestigationProps> = ({
   onNavigateToCharge
 }) => {
   const [copied, setCopied] = useState(false);
-  const [isAudited, setIsAudited] = useState(charge.status === 'Audited');
 
   const currentIndex = allCharges.findIndex((c) => c.id === charge.id);
   const prevCharge = currentIndex > 0 ? allCharges[currentIndex - 1] : null;
@@ -46,7 +44,14 @@ export const ChargeInvestigation: React.FC<ChargeInvestigationProps> = ({
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const renderStatusBadge = (status: RequirementStatus) => {
+  const renderStatusBadge = (status: RequirementStatus | null) => {
+    if (status === null) {
+      return (
+        <span className="font-mono text-xs text-[#737067] border border-[#D5D1C7] px-2 py-0.5">
+          STATUS NOT SUPPLIED
+        </span>
+      );
+    }
     switch (status) {
       case 'PASS':
         return (
@@ -126,10 +131,10 @@ export const ChargeInvestigation: React.FC<ChargeInvestigationProps> = ({
             </span>
             <DecisionBadge decision={charge.decision} size="lg" />
             <span className="font-mono text-xs bg-[#EAE6DD] text-[#55524B] px-2.5 py-1">
-              {charge.confidence}% Confidence
+              {charge.confidence === null ? 'Confidence not supplied' : `${charge.confidence}% Confidence`}
             </span>
             <span className="font-mono text-xs border border-[#C5C2BA] text-[#55524B] px-2.5 py-1">
-              Unit: {charge.unitId}
+              Unit: {charge.unitId || 'Not supplied'}
             </span>
           </div>
 
@@ -138,7 +143,7 @@ export const ChargeInvestigation: React.FC<ChargeInvestigationProps> = ({
             <span aria-hidden="true">·</span>
             <span>SKU: {charge.sku}</span>
             <span aria-hidden="true">·</span>
-            <span>{charge.fulfillmentCenter}</span>
+            {charge.fulfillmentCenter && <><span aria-hidden="true">·</span><span>{charge.fulfillmentCenter}</span></>}
             <span aria-hidden="true">·</span>
             <span>Transacted: {charge.date}</span>
           </p>
@@ -150,19 +155,7 @@ export const ChargeInvestigation: React.FC<ChargeInvestigationProps> = ({
             className="px-3.5 py-2 border border-[#151515] bg-[#FAF8F5] hover:bg-[#ECE9E2] text-xs font-medium text-[#151515] transition-colors cursor-pointer flex items-center gap-1.5 active:translate-y-[1px]"
           >
             {copied ? <Check className="w-3.5 h-3.5 text-emerald-700" /> : <Copy className="w-3.5 h-3.5" />}
-            <span>{copied ? 'Reference Copied' : 'Copy Claim Ref'}</span>
-          </button>
-
-          <button
-            onClick={() => setIsAudited(!isAudited)}
-            className={`px-4 py-2 text-xs font-medium transition-colors cursor-pointer flex items-center gap-1.5 active:translate-y-[1px] ${
-              isAudited
-                ? 'bg-emerald-800 text-white'
-                : 'bg-[#151515] text-[#F5F3EE] hover:bg-[#333333]'
-            }`}
-          >
-            <FileCheck className="w-3.5 h-3.5" />
-            <span>{isAudited ? 'Marked as Audited' : 'Verify & Sign Audit'}</span>
+            <span>{copied ? 'Reference Copied' : 'Copy Charge Ref'}</span>
           </button>
         </div>
       </div>
@@ -188,7 +181,7 @@ export const ChargeInvestigation: React.FC<ChargeInvestigationProps> = ({
                 <span className="text-[#737067] uppercase block text-[10px] mb-0.5">
                   Unit Identifier
                 </span>
-                <span className="text-[#151515] font-bold text-sm">{charge.unitId}</span>
+                  <span className="text-[#151515] font-bold text-sm">{charge.unitId || 'Not supplied'}</span>
               </div>
               <div>
                 <span className="text-[#737067] uppercase block text-[10px] mb-0.5">
@@ -215,7 +208,7 @@ export const ChargeInvestigation: React.FC<ChargeInvestigationProps> = ({
                   Decision & Score
                 </span>
                 <span className="text-[#151515] font-bold">
-                  {charge.decision} ({charge.confidence}%)
+                  {charge.decision} ({charge.confidence === null ? 'confidence not supplied' : `${charge.confidence}%`})
                 </span>
               </div>
             </div>
@@ -301,7 +294,7 @@ export const ChargeInvestigation: React.FC<ChargeInvestigationProps> = ({
                 </p>
               </div>
               <span className="text-xs font-mono text-[#151515] font-semibold bg-[#EAE7DF] px-2 py-1">
-                6 Verified Steps
+                Backend Result
               </span>
             </div>
 
@@ -325,7 +318,7 @@ export const ChargeInvestigation: React.FC<ChargeInvestigationProps> = ({
                   02. Unit Matched
                 </div>
                 <p className="text-xs text-[#55524B] mt-0.5">
-                  Unit serial {charge.unitId} matched with catalog SKU {charge.sku} in {charge.fulfillmentCenter}.
+                  Unit: {charge.unitId || 'not supplied'}. SKU: {charge.sku || 'not supplied'}. Shipment: {charge.shipmentId || 'not supplied'}.
                 </p>
               </div>
 
@@ -336,7 +329,7 @@ export const ChargeInvestigation: React.FC<ChargeInvestigationProps> = ({
                   03. Operational Event Correlated
                 </div>
                 <p className="text-xs text-[#55524B] mt-0.5">
-                  Physical warehouse events indexed across dock receiving, prep stations, pack scales, and return bays.
+                  The backend returned {charge.evidenceCount} evidence records for this charge.
                 </p>
               </div>
 
@@ -347,7 +340,7 @@ export const ChargeInvestigation: React.FC<ChargeInvestigationProps> = ({
                   04. Evidence Retrieved
                 </div>
                 <p className="text-xs text-[#55524B] mt-0.5">
-                  {charge.evidence.length} authoritative telemetry records queried from manager repositories.
+                  {charge.evidence.length} evidence records returned.
                 </p>
               </div>
 
@@ -358,7 +351,9 @@ export const ChargeInvestigation: React.FC<ChargeInvestigationProps> = ({
                   05. Requirement Checked
                 </div>
                 <p className="text-xs text-[#55524B] mt-0.5">
-                  Contractual rules evaluated: {charge.requirements.filter((r) => r.status === 'PASS').length} Passed, {charge.requirements.filter((r) => r.status !== 'PASS').length} Deviated/Contradicted.
+                  {charge.requirements.some((requirement) => requirement.status !== null)
+                    ? `${charge.requirements.filter((requirement) => requirement.status === 'PASS').length} passed, ${charge.requirements.filter((requirement) => requirement.status === 'FAIL' || requirement.status === 'CONTRADICTED').length} failed or contradicted.`
+                    : `${charge.requirements.length} requirements returned; per-requirement evaluation statuses were not supplied.`}
                 </p>
               </div>
 
@@ -369,7 +364,7 @@ export const ChargeInvestigation: React.FC<ChargeInvestigationProps> = ({
                   06. Final Recovery Decision
                 </div>
                 <p className="text-xs text-[#151515] font-semibold mt-0.5">
-                  {charge.decision} recommended with {charge.confidence}% confidence score.
+                  {charge.decision}{charge.confidence === null ? '' : ` with ${charge.confidence}% confidence`}.
                 </p>
               </div>
             </div>
@@ -383,7 +378,7 @@ export const ChargeInvestigation: React.FC<ChargeInvestigationProps> = ({
                   Upstream Manager Telemetry
                 </h3>
                 <p className="text-xs text-[#737067]">
-                  Evidence retrieved from Receiving, Prep, Pack, and Returns Managers
+                  Evidence records returned for this charge
                 </p>
               </div>
               <span className="text-xs font-mono text-[#737067]">
@@ -409,9 +404,9 @@ export const ChargeInvestigation: React.FC<ChargeInvestigationProps> = ({
 
                     <span
                       className={`font-mono text-[11px] px-2 py-0.5 border ${
-                        ev.status === 'VERIFIED'
+                        ev.status === 'VERIFIED' || ev.status === 'PASS'
                           ? 'border-emerald-300 text-emerald-800 bg-[#E8F4EC]'
-                          : ev.status === 'DISCREPANCY'
+                          : ev.status === 'DISCREPANCY' || ev.status === 'FAIL'
                           ? 'border-[#C64B32] text-[#C64B32] bg-[#FAF3F1]'
                           : 'border-[#8C8980] text-[#737067] bg-[#FAF8F5]'
                       }`}
@@ -431,19 +426,19 @@ export const ChargeInvestigation: React.FC<ChargeInvestigationProps> = ({
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-2 border-t border-[#E2DFD7] text-[11px] font-mono text-[#737067]">
                     <div>
                       <span className="block text-[10px] uppercase">Timestamp</span>
-                      <span className="text-[#151515]">{ev.timestamp}</span>
+                        <span className="text-[#151515]">{ev.timestamp || 'Not supplied'}</span>
                     </div>
                     <div>
                       <span className="block text-[10px] uppercase">Station / Line</span>
-                      <span className="text-[#151515]">{ev.stationId}</span>
+                        <span className="text-[#151515]">{ev.stationId || 'Not supplied'}</span>
                     </div>
                     <div>
                       <span className="block text-[10px] uppercase">Operator Ref</span>
-                      <span className="text-[#151515]">{ev.operatorId}</span>
+                        <span className="text-[#151515]">{ev.operatorId || 'Not supplied'}</span>
                     </div>
                     <div>
                       <span className="block text-[10px] uppercase">Telemetry Ref</span>
-                      <span className="text-[#151515]">{ev.systemRef}</span>
+                        <span className="text-[#151515]">{ev.systemRef || 'Not supplied'}</span>
                     </div>
                   </div>
 

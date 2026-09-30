@@ -6,14 +6,20 @@ Latest project state
 - Supports the legacy charge ledger and normalized charge CSV schema from recovery-data-contract.md.
 - Adds tenant-scoped POST /api/reimbursements/upload for the documented reimbursement report schema.
 - Analysis nets cancellation rows and marks ALREADY_REIMBURSED only when strict order/SKU/currency/quantity/amount matching covers a charge. Credit balances are consumed once.
-- Adds backend/ai/GeminiUnitDecisionProvider.java using Gemini's pretrained REST API with one call per unit when configured. Set GEMINI_API_KEY in the backend process environment; GEMINI_MODEL defaults to gemini-3.8-flash. Never put the key in frontend env files or commit it.
-- Provider restricts output to CONTESTED, ACCEPTED, INSUFFICIENT_EVIDENCE and validates evidence/rule IDs, charge type, evidence status, and evidence date. Reimbursement matching remains deterministic; absent API key/evidence/rules and model failures fail open to review.
-- Official evidence-contract.md and authoritative Amazon policy data are still missing. A live Gemini call was not verified because no API key was available. Real-world decision quality is not validated.
+- Backend defaults now use PostgreSQL at localhost:5432; MySQL driver removed. Backend HTTP defaults to port 8081 to avoid the Jenkins service on 8080.
+- PostgresRlsInitializer applies ENABLE and FORCE ROW LEVEL SECURITY with an organization policy to all seven tenant tables, including reimbursements_received. Use a non-superuser, non-BYPASSRLS recovery_app role that owns the database/tables.
+- PostgreSQL-backed API returned HTTP 200 on port 8081 and a read-only charges query returned 10 rows for org_demo_alpha. This verifies connectivity, not cross-tenant RLS isolation. Existing MySQL data was not migrated; re-import required CSVs into PostgreSQL.
+- Adds a standalone Python service under `AI model/` using the pretrained Apache-2.0 Qwen2.5-1.5B-Instruct model. It does not train model weights and has no Gemini dependency.
+- The backend bridge is `backend/src/main/java/com/cube/buildathon/recoverymanager/backend/ai/PythonUnitDecisionProvider.java`, which sends one unit per call to localhost:8090. Java and Python validate output references, charge type, evidence status/date, and use INSUFFICIENT_EVIDENCE on invalid output or service failure.
+- Python 3.14 and an RTX 4060 Laptop GPU (8 GB) are present. `AI model/.venv` has CUDA PyTorch, Transformers, FastAPI, and Uvicorn; health reports Qwen loaded on cuda:0. Model weights remain outside Git.
+- A synthetic unit call to Python `/v1/analyze-unit` returned CONTESTED with the supplied evidence/rule citations. Java provider opt-in smoke test also passed against the running service (3 tests, 0 failures); Python decision validation tests passed (5 tests, 0 failures).
+- Added `AI model/amazon_rules.json` with official Amazon FBA/Seller Central source URLs and retrieval metadata. Detailed Seller Central pages redirected to authentication, so every catalog rule remains `verified: false`; the Python runtime refuses claim-supporting verdicts until verified policy text is supplied.
+- Added and ran `AI model/run_sample_analysis.py`; the supplied-data result is 8 rows, all INSUFFICIENT_EVIDENCE, with groundTruth=false. This demonstrates safe end-to-end plumbing, not accuracy.
+- Official evidence-contract.md and authoritative Amazon policy data are still missing. The synthetic result demonstrates plumbing only; real-world decision quality is not validated.
 - Frontend has separate reimbursement import, both charge formats, contract verdict labels, and counts.
-- MySQL retained by user choice. Application organization scoping is not equivalent to the mandatory DB-enforced RLS requirement in RULES.md; MySQL cannot provide that PostgreSQL-style RLS.
-- Checks: 10 focused Gemini-provider/reimbursement-matcher unit tests passed; earlier parser tests (14) passed; frontend TypeScript lint and production build passed; upload page rendered at http://localhost:3000/.
-- The DB-backed integration test was added but not run because the test process does not have the backend session's DB credentials. Restart the backend in its credentialed PowerShell session to load the new API/schema.
-- No .git metadata is present in this workspace, so there is no git status/diff and no commit was made.
+- PostgreSQL is selected to satisfy the RLS requirement. Verify isolation with populated rows for both orgs; no dedicated live PostgreSQL RLS isolation test has run yet.
+- Parser/matcher/PostgreSQL change unit tests passed earlier (16 tests); Python decision safety tests passed (5); live Java-to-Python smoke test passed (3). Full database-backed integration suite remains unrun.
+- The active Git clone is `E:\sydon rcm pro\recovery-manager-fork-clean`, remote `origin` is the user's fork. The last confirmed remote commit was 44c5511 before the PostgreSQL/Python updates; review and commit/push the current changes. Do not stage generated `backend/target` (now ignored) or secrets.
 
 The historical notes below do not override this latest status.
 

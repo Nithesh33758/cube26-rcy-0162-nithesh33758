@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: sydon-recovery-manager
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    region: oregon
+    envVars:
+      - key: PORT
+        value: 10000
+      - key: DEFAULT_ORG_ID
+        value: org_demo_alpha
+      - key: FRONTEND_ORIGINS
+        value: "*"

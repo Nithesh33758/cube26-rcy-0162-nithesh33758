@@ -9,6 +9,8 @@ import org.springframework.data.repository.query.Param;
 import java.util.List;
 
 public interface EvidenceRepository extends JpaRepository<Evidence, Long> {
+        boolean existsByOrgIdAndRecordId(String orgId, String recordId);
+
     @Query("""
             select e from Evidence e
             where e.orgId = :orgId and e.unitId = :unitId

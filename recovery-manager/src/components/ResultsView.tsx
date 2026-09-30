@@ -1,10 +1,12 @@
 import React from 'react';
-import { Charge } from '../types';
+import { AnalysisSummary, Charge } from '../types';
 import { ChargeTable } from './ChargeTable';
 import { Download, RefreshCw, AlertCircle, CheckCircle, ArrowRight } from 'lucide-react';
 
 interface ResultsViewProps {
   charges: Charge[];
+  summary: AnalysisSummary | null;
+  validationErrors: Array<{ row: number; field: string; error: string }>;
   onSelectCharge: (charge: Charge) => void;
   onOpenReviewQueue: () => void;
   onOpenAnalytics: () => void;
@@ -14,24 +16,37 @@ interface ResultsViewProps {
 
 export const ResultsView: React.FC<ResultsViewProps> = ({
   charges,
+  summary,
+  validationErrors,
   onSelectCharge,
   onOpenReviewQueue,
   onOpenAnalytics,
   onOpenEvidence,
   onNewAnalysis
 }) => {
-  const totalChargesCount = charges.length;
-  const claimsRecommended = charges.filter((c) => c.decision === 'CLAIM' || c.decision === 'CONTESTED');
+  const totalChargesCount = summary?.totalCharges ?? charges.length;
+  const claimCharges = charges.filter((c) => c.decision === 'CLAIM');
   const rejectedCharges = charges.filter((c) => c.decision === 'REJECT' || c.decision === 'ACCEPTED');
-  const uncertainCharges = charges.filter((c) =>
-    c.decision === 'UNCERTAIN' || c.decision === 'INSUFFICIENT_EVIDENCE' || c.decision === 'PENDING_REVIEW');
+  const uncertainCharges = charges.filter((c) => c.decision === 'UNCERTAIN' || c.decision === 'INSUFFICIENT_EVIDENCE');
   const reimbursedCharges = charges.filter((c) => c.decision === 'ALREADY_REIMBURSED');
   const outOfWindowCharges = charges.filter((c) => c.decision === 'OUT_OF_WINDOW');
 
-  const totalAmount = charges.reduce((acc, c) => acc + c.amount, 0);
-  const claimAmount = claimsRecommended.reduce((acc, c) => acc + c.amount, 0);
-  const rejectAmount = rejectedCharges.reduce((acc, c) => acc + c.amount, 0);
-  const uncertainAmount = uncertainCharges.reduce((acc, c) => acc + c.amount, 0);
+  const claimsRecommendedCount = summary?.claimsRecommended ?? claimCharges.length;
+  const rejectedCount = summary?.rejected ?? rejectedCharges.length;
+  const uncertainCount = summary?.uncertain ?? uncertainCharges.length;
+  const reimbursedCount = summary?.alreadyReimbursed ?? reimbursedCharges.length;
+  const outOfWindowCount = summary?.outOfWindow ?? outOfWindowCharges.length;
+
+  const formatAmounts = (items: Charge[]) => {
+    const amountsByCurrency = items.reduce<Map<string, number>>((totals, charge) => {
+      totals.set(charge.currency, (totals.get(charge.currency) ?? 0) + charge.amount);
+      return totals;
+    }, new Map());
+    if (items.length === 0) return '0';
+    return [...amountsByCurrency.entries()]
+      .map(([currency, currencyAmount]) => `${currency} ${currencyAmount.toLocaleString(undefined, { maximumFractionDigits: 2 })}`)
+      .join(' / ');
+  };
 
   const handleExportCSV = () => {
     const headers = ['Charge ID', 'Unit ID', 'Charge Type', 'Amount', 'Currency', 'Decision', 'Confidence', 'Status', 'Date', 'SKU', 'Fulfillment Center'];
@@ -42,7 +57,7 @@ export const ResultsView: React.FC<ResultsViewProps> = ({
       c.amount,
       c.currency,
       c.decision,
-      `${c.confidence}%`,
+      c.confidence === null ? '' : `${c.confidence}%`,
       c.status,
       c.date,
       c.sku,
@@ -95,8 +110,25 @@ export const ResultsView: React.FC<ResultsViewProps> = ({
         </div>
       </div>
 
+      {validationErrors.length > 0 && (
+        <div className="border border-amber-700 bg-amber-50 p-4 text-sm text-amber-950">
+          <div className="flex items-center gap-2 font-semibold">
+            <AlertCircle className="w-4 h-4 shrink-0" />
+            <span>{validationErrors.length} CSV row validation issue(s); rejected rows are not included in the analysis.</span>
+          </div>
+          <ul className="mt-2 space-y-1 text-xs font-mono">
+            {validationErrors.slice(0, 8).map((validationError, index) => (
+              <li key={`${validationError.row}-${validationError.field}-${index}`}>
+                Row {validationError.row}, {validationError.field}: {validationError.error}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       {/* Editorial Metric Blocks - Asymmetric layout, thin borders, strong typography */}
-      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-0 border border-[#151515] bg-[#FAF8F5] divide-y md:divide-y-0 md:divide-x divide-[#151515]">
+      {/* Metric Blocks - Exactly 3 Outputs: Claim, Reject, Uncertain */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-0 border border-[#151515] bg-[#FAF8F5] divide-y sm:divide-y-0 sm:divide-x divide-[#151515]">
         {/* Total Charges */}
         <div className="p-6">
           <span className="text-[11px] font-mono uppercase tracking-wider text-[#737067] block mb-1">
@@ -106,70 +138,46 @@ export const ResultsView: React.FC<ResultsViewProps> = ({
             {totalChargesCount}
           </div>
           <div className="text-xs font-mono text-[#737067] mt-1 tabular-nums">
-            ₹{totalAmount.toLocaleString('en-IN', { maximumFractionDigits: 0 })} gross ledger
+            {formatAmounts(charges)} gross ledger
           </div>
         </div>
 
-        {/* Claims Recommended - Burnt Rust Accent */}
-        <div className="p-6 bg-[#FAF3F1]">
-          <span className="text-[11px] font-mono uppercase tracking-wider text-[#C64B32] font-semibold block mb-1">
-            Claims Recommended
+        {/* Claim */}
+        <div className="p-6 bg-emerald-50/60">
+          <span className="text-[11px] font-mono uppercase tracking-wider text-emerald-800 font-semibold block mb-1">
+            Claim
           </span>
-          <div className="font-heading text-3xl font-bold text-[#C64B32] tabular-nums">
-            {claimsRecommended.length}
+          <div className="font-heading text-3xl font-bold text-emerald-800 tabular-nums">
+            {claimsRecommendedCount}
           </div>
-          <div className="text-xs font-mono text-[#C64B32] mt-1 font-medium tabular-nums">
-            ₹{claimAmount.toLocaleString('en-IN', { maximumFractionDigits: 0 })} recoverable
+          <div className="text-xs font-mono text-emerald-800 mt-1 font-medium tabular-nums">
+            {formatAmounts(claimCharges)} recoverable
           </div>
         </div>
 
-        {/* Rejected */}
+        {/* Reject */}
         <div className="p-6">
           <span className="text-[11px] font-mono uppercase tracking-wider text-[#737067] block mb-1">
-            Rejected
+            Reject
           </span>
           <div className="font-heading text-3xl font-bold text-[#151515] tabular-nums">
-            {rejectedCharges.length}
+            {rejectedCount}
           </div>
           <div className="text-xs font-mono text-[#737067] mt-1 tabular-nums">
-            ₹{rejectAmount.toLocaleString('en-IN', { maximumFractionDigits: 0 })} supported fees
+            {formatAmounts(rejectedCharges)} legitimate
           </div>
         </div>
 
         {/* Uncertain */}
-        <div className="p-6">
-          <span className="text-[11px] font-mono uppercase tracking-wider text-[#737067] block mb-1">
+        <div className="p-6 bg-amber-50/60">
+          <span className="text-[11px] font-mono uppercase tracking-wider text-amber-900 font-semibold block mb-1">
             Uncertain
           </span>
-          <div className="font-heading text-3xl font-bold text-[#55524B] tabular-nums">
-            {uncertainCharges.length}
-          </div>
-          <div className="text-xs font-mono text-[#737067] mt-1 tabular-nums">
-            ₹{uncertainAmount.toLocaleString('en-IN', { maximumFractionDigits: 0 })} for auditor queue
-          </div>
-        </div>
-
-        <div className="p-6">
-          <span className="text-[11px] font-mono uppercase tracking-wider text-emerald-800 block mb-1">
-            Already Reimbursed
-          </span>
-          <div className="font-heading text-3xl font-bold text-emerald-900 tabular-nums">
-            {reimbursedCharges.length}
-          </div>
-          <div className="text-xs font-mono text-[#737067] mt-1 tabular-nums">
-            Duplicate claim suppressed
-          </div>
-        </div>
-
-        <div className="p-6">
-          <span className="text-[11px] font-mono uppercase tracking-wider text-amber-800 block mb-1">
-            Out of Window
-          </span>
           <div className="font-heading text-3xl font-bold text-amber-900 tabular-nums">
-            {outOfWindowCharges.length}
+            {uncertainCount}
           </div>
-          <div className="text-xs font-mono text-[#737067] mt-1 tabular-nums">
-            Filing deadline passed
+          <div className="text-xs font-mono text-amber-800 mt-1 tabular-nums">
+            {formatAmounts(uncertainCharges)} manual review
           </div>
         </div>
       </div>

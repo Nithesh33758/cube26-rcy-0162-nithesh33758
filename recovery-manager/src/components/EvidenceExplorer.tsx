@@ -30,7 +30,7 @@ export interface UnifiedEvidenceRow {
   evidenceType: string;
   sourceManager: ManagerType | 'Returns / Salvage' | 'Receiving / Dock';
   requirement: string;
-  evidenceStatus: 'VERIFIED' | 'DISCREPANCY' | 'MISSING' | 'CONTRADICTED' | 'FLAGGED';
+  evidenceStatus: string;
   keyFinding: string;
   metric?: string;
   timestamp: string;
@@ -55,27 +55,12 @@ export const EvidenceExplorer: React.FC<EvidenceExplorerProps> = ({
   // Selected evidence for deep telemetry inspection modal
   const [selectedEvidence, setSelectedEvidence] = useState<UnifiedEvidenceRow | null>(null);
 
-  // Compile single unified evidence list across all charges, including missing/contradicted evidence requirements
+  // Show only evidence records returned by the backend.
   const allRows: UnifiedEvidenceRow[] = useMemo(() => {
     const rows: UnifiedEvidenceRow[] = [];
 
     charges.forEach((c) => {
-      // 1. Existing verified and discrepancy evidence logs
       c.evidence.forEach((ev) => {
-        // Associated requirement name
-        const matchedReq = c.requirements.find(
-          (r) =>
-            (ev.manager === 'Receiving Manager' && r.category === 'Receiving') ||
-            (ev.manager === 'Prep Manager' && r.category === 'Operational') ||
-            (ev.manager === 'Pack Manager' && r.category === 'Evidence') ||
-            (ev.manager === 'Returns Manager' && r.category === 'Operational')
-        ) || c.requirements[0];
-
-        let status = ev.status as UnifiedEvidenceRow['evidenceStatus'];
-        if (matchedReq?.status === 'CONTRADICTED' && ev.status === 'DISCREPANCY') {
-          status = 'CONTRADICTED';
-        }
-
         rows.push({
           id: ev.id,
           unitId: c.unitId,
@@ -83,8 +68,8 @@ export const EvidenceExplorer: React.FC<EvidenceExplorerProps> = ({
           chargeType: c.chargeType,
           evidenceType: ev.type,
           sourceManager: ev.manager,
-          requirement: matchedReq ? `${matchedReq.name} [${matchedReq.ruleCode}]` : 'Standard Calibration Check',
-          evidenceStatus: status,
+          requirement: ev.requirement || 'Not supplied',
+          evidenceStatus: ev.status,
           keyFinding: ev.description,
           metric: ev.metric,
           timestamp: ev.timestamp,
@@ -94,31 +79,12 @@ export const EvidenceExplorer: React.FC<EvidenceExplorerProps> = ({
         });
       });
 
-      // 2. Synthetic unified rows for missing requirements to ensure full visibility of missing evidence
-      c.requirements
-        .filter((r) => r.status === 'MISSING')
-        .forEach((r, idx) => {
-          rows.push({
-            id: `EVD-MISSING-${c.id}-${idx}`,
-            unitId: c.unitId,
-            chargeId: c.id,
-            chargeType: c.chargeType,
-            evidenceType: 'Missing Photographic / Telemetry Proof',
-            sourceManager: r.category === 'Receiving' ? 'Receiving Manager' : (r.category === 'Operational' ? 'Prep Manager' : 'Returns Manager'),
-            requirement: `${r.name} [${r.ruleCode}]`,
-            evidenceStatus: 'MISSING',
-            keyFinding: `Mandatory evidence required by clause ${r.ruleCode} was not uploaded or captured by station sensors.`,
-            metric: 'N/A (Telemetry Missing)',
-            timestamp: `${c.date} 12:00:00 IST`,
-            stationId: 'FC-AUDIT-BAY',
-            operatorId: 'SYSTEM-AUDIT',
-            systemRef: `DISPUTE-REQ-${r.ruleCode}`
-          });
-        });
     });
 
     return rows;
   }, [charges]);
+  const availableManagers = Array.from(new Set(allRows.map((row) => row.sourceManager)));
+  const availableStatuses = Array.from(new Set(allRows.map((row) => row.evidenceStatus)));
 
   // Filtering
   const filteredRows = useMemo(() => {
@@ -187,39 +153,19 @@ export const EvidenceExplorer: React.FC<EvidenceExplorerProps> = ({
   };
 
   const renderStatusBadge = (status: UnifiedEvidenceRow['evidenceStatus']) => {
-    switch (status) {
-      case 'VERIFIED':
-        return (
-          <span className="font-mono text-[10px] font-semibold text-emerald-800 bg-[#E8F4EC] border border-emerald-300 px-2 py-0.5 inline-flex items-center gap-1">
-            ✓ VERIFIED
-          </span>
-        );
-      case 'DISCREPANCY':
-        return (
-          <span className="font-mono text-[10px] font-semibold text-[#C64B32] bg-[#FAF3F1] border border-[#C64B32] px-2 py-0.5 inline-flex items-center gap-1">
-            ! DISCREPANCY
-          </span>
-        );
-      case 'MISSING':
-        return (
-          <span className="font-mono text-[10px] font-semibold text-[#9C3824] bg-[#FDF0ED] border border-[#D97706] text-[#B45309] px-2 py-0.5 inline-flex items-center gap-1">
-            ✕ MISSING
-          </span>
-        );
-      case 'CONTRADICTED':
-        return (
-          <span className="font-mono text-[10px] font-semibold text-[#881337] bg-[#FFF1F2] border border-[#E11D48] px-2 py-0.5 inline-flex items-center gap-1">
-            ≠ CONTRADICTED
-          </span>
-        );
-      case 'FLAGGED':
-      default:
-        return (
-          <span className="font-mono text-[10px] font-semibold text-[#151515] bg-[#EAE6DD] border border-[#151515] px-2 py-0.5 inline-flex items-center gap-1">
-            ● FLAGGED
-          </span>
-        );
-    }
+    const normalized = status.toUpperCase();
+    const style = normalized === 'VERIFIED' || normalized === 'PASS'
+      ? 'text-emerald-800 bg-[#E8F4EC] border-emerald-300'
+      : normalized === 'DISCREPANCY' || normalized === 'FAIL'
+        ? 'text-[#C64B32] bg-[#FAF3F1] border-[#C64B32]'
+        : normalized === 'MISSING' || normalized === 'CONTRADICTED'
+          ? 'text-[#9C3824] bg-[#F7EBE8] border-[#9C3824]'
+          : 'text-[#151515] bg-[#EAE6DD] border-[#151515]';
+    return (
+      <span className={`font-mono text-[10px] font-semibold border px-2 py-0.5 inline-flex items-center gap-1 ${style}`}>
+        {status.replaceAll('_', ' ')}
+      </span>
+    );
   };
 
   return (
@@ -239,7 +185,7 @@ export const EvidenceExplorer: React.FC<EvidenceExplorerProps> = ({
             Unified Evidence Master Ledger
           </h1>
           <p className="text-sm text-[#55524B] mt-1 max-w-2xl leading-relaxed">
-            Consolidated operational evidence records across Receiving, Prep, Pack, and Returns managers in a singular investigative operations table.
+            Evidence records and source labels returned with the backend analysis.
           </p>
         </div>
 
@@ -273,7 +219,7 @@ export const EvidenceExplorer: React.FC<EvidenceExplorerProps> = ({
         {/* Manager Filter Tabs & Status Dropdown */}
         <div className="flex flex-wrap items-center gap-2">
           <div className="flex items-center border border-[#E2DFD7] bg-[#F5F3EE] p-0.5 text-xs font-mono">
-            {['ALL', 'Receiving Manager', 'Prep Manager', 'Pack Manager', 'Returns Manager'].map((mgr) => (
+            {['ALL', ...availableManagers].map((mgr) => (
               <button
                 key={mgr}
                 onClick={() => {
@@ -300,11 +246,7 @@ export const EvidenceExplorer: React.FC<EvidenceExplorerProps> = ({
             className="border border-[#E2DFD7] bg-[#F5F3EE] px-3 py-1.5 text-xs text-[#151515] font-mono focus:outline-none cursor-pointer"
           >
             <option value="ALL">All Statuses</option>
-            <option value="VERIFIED">Verified</option>
-            <option value="DISCREPANCY">Discrepancy</option>
-            <option value="MISSING">Missing Evidence</option>
-            <option value="CONTRADICTED">Contradicted</option>
-            <option value="FLAGGED">Flagged</option>
+            {availableStatuses.map((status) => <option key={status} value={status}>{status.replaceAll('_', ' ')}</option>)}
           </select>
         </div>
       </div>

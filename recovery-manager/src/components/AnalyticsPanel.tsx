@@ -1,13 +1,40 @@
 import React from 'react';
-import { ANALYTICS_DATA } from '../data/mockData';
-import { ArrowLeft, Target, Percent, ShieldCheck, Scale, AlertOctagon } from 'lucide-react';
+import { AnalysisSummary, Charge } from '../types';
+import { ArrowLeft, Target } from 'lucide-react';
 
 interface AnalyticsPanelProps {
+  charges: Charge[];
+  summary: AnalysisSummary | null;
   onBack: () => void;
 }
 
-export const AnalyticsPanel: React.FC<AnalyticsPanelProps> = ({ onBack }) => {
-  const data = ANALYTICS_DATA;
+function formatAmount(charges: Charge[]): string {
+  const totals = charges.reduce<Map<string, number>>((amounts, charge) => {
+    amounts.set(charge.currency, (amounts.get(charge.currency) ?? 0) + charge.amount);
+    return amounts;
+  }, new Map());
+  if (totals.size === 0) return '0';
+  return [...totals.entries()].map(([currency, amount]) =>
+    `${currency} ${amount.toLocaleString(undefined, { maximumFractionDigits: 2 })}`).join(' / ');
+}
+
+export const AnalyticsPanel: React.FC<AnalyticsPanelProps> = ({ charges, summary, onBack }) => {
+  const claimCharges = charges.filter((charge) => charge.decision === 'CLAIM');
+  const rejectCharges = charges.filter((charge) => charge.decision === 'REJECT');
+  const uncertainCharges = charges.filter((charge) => charge.decision === 'UNCERTAIN');
+  const typeGroups = Array.from(charges.reduce<Map<string, Charge[]>>((groups, charge) => {
+    const group = groups.get(charge.chargeType) ?? [];
+    group.push(charge);
+    groups.set(charge.chargeType, group);
+    return groups;
+  }, new Map()));
+  const totalCharges = summary?.totalCharges ?? charges.length;
+  const uncertain = summary?.uncertain ?? uncertainCharges.length;
+  const uncertainRate = totalCharges === 0 ? 0 : (uncertain / totalCharges) * 100;
+  const confidenceValues = charges.map((charge) => charge.confidence)
+    .filter((confidence): confidence is number => confidence !== null);
+  const averageConfidence = confidenceValues.length === 0 ? null
+    : confidenceValues.reduce((total, confidence) => total + confidence, 0) / confidenceValues.length;
 
   return (
     <div className="max-w-7xl mx-auto px-6 py-10 space-y-10">
@@ -23,25 +50,31 @@ export const AnalyticsPanel: React.FC<AnalyticsPanelProps> = ({ onBack }) => {
           </button>
 
           <h1 className="font-heading text-3xl sm:text-4xl font-bold tracking-tight text-[#151515]">
-            Recovery Analytics & Precision
+            Recovery Analytics
           </h1>
           <p className="text-sm text-[#55524B] mt-1 max-w-2xl leading-relaxed">
-            Quantitative analysis of automated recovery decisions, false-positive mitigation, and operational telemetry precision.
+            Counts and amounts derived from the completed backend analysis.
           </p>
         </div>
 
         <div className="text-right">
           <span className="text-[11px] font-mono uppercase tracking-wider text-[#737067] block mb-0.5">
-            Audit Ledger Sample
+            Current Analysis
           </span>
           <span className="font-mono text-xs font-semibold text-[#151515]">
-            320 Units / March 2026 Batch
+            {summary ? `${summary.totalCharges} Charges` : 'No completed analysis'}
           </span>
         </div>
       </div>
 
+      {!summary && (
+        <div className="border border-[#E2DFD7] bg-[#FAF8F5] p-8 text-sm text-[#737067]">
+          No completed analysis is loaded. Upload a charge report to view analytics.
+        </div>
+      )}
+
       {/* Hero Metric Section: CLAIM PRECISION (Visually Important) */}
-      <div className="border border-[#151515] bg-[#151515] text-[#F5F3EE] p-8 sm:p-12 relative overflow-hidden">
+      {summary && <div className="border border-[#151515] bg-[#151515] text-[#F5F3EE] p-8 sm:p-12 relative overflow-hidden">
         <div className="max-w-3xl">
           <div className="inline-flex items-center gap-2 text-xs font-mono uppercase tracking-widest text-[#C5C2BA] mb-3 border-b border-[#333333] pb-1">
             <Target className="w-4 h-4 text-[#C64B32]" />
@@ -50,126 +83,98 @@ export const AnalyticsPanel: React.FC<AnalyticsPanelProps> = ({ onBack }) => {
 
           <div className="flex flex-col sm:flex-row sm:items-baseline gap-4 sm:gap-6 mb-4">
             <span className="font-heading text-6xl sm:text-7xl font-bold tracking-tight text-white tabular-nums">
-              {data.claimPrecision}%
+              {summary?.claimsRecommended ?? 0}
             </span>
             <span className="font-heading text-2xl sm:text-3xl font-semibold text-[#E2DFD7]">
-              Verified Claim Precision
+              CLAIM Decisions
             </span>
           </div>
 
           <p className="text-sm text-[#C5C2BA] leading-relaxed max-w-2xl">
-            178 out of 184 system-recommended claims passed independent warehouse audit and carrier reconciliation without clawback. Only 6 claims were contested or adjusted due to secondary packing exceptions.
+            Backend analysis summary for the currently loaded report. Independent audit labels are not part of this response, so precision and false-positive rates cannot be calculated.
           </p>
 
-          <div className="mt-8 pt-6 border-t border-[#333333] grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs font-mono">
+          <div className="mt-8 pt-6 border-t border-[#333333] grid grid-cols-3 gap-4 text-xs font-mono">
             <div>
-              <span className="text-[#8E8B83] block uppercase text-[10px]">Precision Formula</span>
-              <span className="text-white font-medium">TP / (TP + FP)</span>
+                <span className="text-[#8E8B83] block uppercase text-[10px]">Claim</span>
+                <span className="text-emerald-400 font-medium tabular-nums">{summary?.claimsRecommended ?? 0}</span>
             </div>
             <div>
-              <span className="text-[#8E8B83] block uppercase text-[10px]">True Positives (TP)</span>
-              <span className="text-white font-medium tabular-nums">{data.correctlySupportedClaims} Claims</span>
+                <span className="text-[#8E8B83] block uppercase text-[10px]">Reject</span>
+                <span className="text-[#E57373] font-medium tabular-nums">{summary?.rejected ?? 0}</span>
             </div>
             <div>
-              <span className="text-[#8E8B83] block uppercase text-[10px]">False Positives (FP)</span>
-              <span className="text-[#E57373] font-medium tabular-nums">{data.incorrectlyRecommendedClaims} Claims</span>
-            </div>
-            <div>
-              <span className="text-[#8E8B83] block uppercase text-[10px]">Missed Claims (FN)</span>
-              <span className="text-[#FFD54F] font-medium tabular-nums">{data.missedRecoverableClaims} Claims</span>
+                <span className="text-[#8E8B83] block uppercase text-[10px]">Uncertain</span>
+                <span className="text-[#FFD54F] font-medium tabular-nums">{summary?.uncertain ?? 0}</span>
             </div>
           </div>
         </div>
-      </div>
+      </div>}
 
       {/* Quantitative Rigor Metric Blocks (Editorial Asymmetric Layout) */}
-      <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-0 border border-[#151515] bg-[#FAF8F5] divide-y md:divide-y-0 md:divide-x divide-[#151515]">
+      {summary && <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-0 border border-[#151515] bg-[#FAF8F5] divide-y sm:divide-y-0 sm:divide-x divide-[#151515]">
         <div className="p-6">
           <span className="text-[11px] font-mono uppercase tracking-wider text-[#737067] block mb-1">
             Total Charges
           </span>
           <div className="font-heading text-2xl font-bold text-[#151515] tabular-nums">
-            {data.totalCharges}
+            {summary?.totalCharges ?? charges.length}
           </div>
           <span className="text-[11px] font-mono text-[#737067] mt-1 block">
-            ₹{data.totalChargesAmount.toLocaleString('en-IN', { maximumFractionDigits: 0 })} gross
+            {formatAmount(charges)} gross ledger
           </span>
         </div>
 
-        <div className="p-6 bg-[#FAF3F1]">
-          <span className="text-[11px] font-mono uppercase tracking-wider text-[#C64B32] font-semibold block mb-1">
-            Claims Recommended
+        <div className="p-6 bg-emerald-50/60">
+          <span className="text-[11px] font-mono uppercase tracking-wider text-emerald-800 font-semibold block mb-1">
+            Claim
           </span>
-          <div className="font-heading text-2xl font-bold text-[#C64B32] tabular-nums">
-            {data.claimsRecommended}
+          <div className="font-heading text-2xl font-bold text-emerald-800 tabular-nums">
+            {summary?.claimsRecommended ?? 0}
           </div>
-          <span className="text-[11px] font-mono text-[#C64B32] mt-1 block font-medium">
-            ₹{data.claimsRecommendedAmount.toLocaleString('en-IN', { maximumFractionDigits: 0 })} yield
+          <span className="text-[11px] font-mono text-emerald-800 mt-1 block font-medium">
+            {formatAmount(claimCharges)} recoverable
           </span>
         </div>
 
         <div className="p-6">
           <span className="text-[11px] font-mono uppercase tracking-wider text-[#737067] block mb-1">
-            Correctly Supported
+            Reject
           </span>
           <div className="font-heading text-2xl font-bold text-[#151515] tabular-nums">
-            {data.correctlySupportedClaims}
-          </div>
-          <span className="text-[11px] font-mono text-emerald-800 mt-1 block">
-            96.7% accuracy
-          </span>
-        </div>
-
-        <div className="p-6">
-          <span className="text-[11px] font-mono uppercase tracking-wider text-[#737067] block mb-1">
-            Incorrectly Recommended
-          </span>
-          <div className="font-heading text-2xl font-bold text-[#151515] tabular-nums">
-            {data.incorrectlyRecommendedClaims}
-          </div>
-          <span className="text-[11px] font-mono text-[#C64B32] mt-1 block">
-            3.3% error rate
-          </span>
-        </div>
-
-        <div className="p-6">
-          <span className="text-[11px] font-mono uppercase tracking-wider text-[#737067] block mb-1">
-            Missed Recoverable
-          </span>
-          <div className="font-heading text-2xl font-bold text-[#151515] tabular-nums">
-            {data.missedRecoverableClaims}
+            {summary?.rejected ?? 0}
           </div>
           <span className="text-[11px] font-mono text-[#737067] mt-1 block">
-            False negatives
+            {formatAmount(rejectCharges)} legitimate
           </span>
         </div>
 
-        <div className="p-6">
-          <span className="text-[11px] font-mono uppercase tracking-wider text-[#737067] block mb-1">
-            Uncertain Rate
+        <div className="p-6 bg-amber-50/60">
+          <span className="text-[11px] font-mono uppercase tracking-wider text-amber-900 font-semibold block mb-1">
+            Uncertain
           </span>
-          <div className="font-heading text-2xl font-bold text-[#55524B] tabular-nums">
-            {data.uncertainRate}%
+          <div className="font-heading text-2xl font-bold text-amber-900 tabular-nums">
+            {summary?.uncertain ?? 0}
           </div>
-          <span className="text-[11px] font-mono text-[#737067] mt-1 block">
-            {data.uncertain} in queue
+          <span className="text-[11px] font-mono text-amber-800 mt-1 block">
+            {formatAmount(uncertainCharges)} manual review ({uncertainRate.toFixed(1)}%)
           </span>
         </div>
-      </div>
+      </div>}
 
       {/* Editorial Detail Table: Recovery Yield by Fee Type */}
-      <div className="border border-[#151515] bg-[#FAF8F5] p-6 space-y-4">
+      {summary && <div className="border border-[#151515] bg-[#FAF8F5] p-6 space-y-4">
         <div className="flex items-center justify-between pb-3 border-b border-[#E2DFD7]">
           <div>
             <h3 className="font-heading text-base font-bold text-[#151515]">
-              Recovery Yield by Fee Type
+              Charge Breakdown by Type
             </h3>
             <p className="text-xs text-[#737067]">
-              Performance across discrete ecommerce fee categories
+              Backend decisions and ledger amounts grouped by charge type
             </p>
           </div>
-          <span className="font-mono text-xs text-[#151515]">
-            6 Categories
+            <span className="font-mono text-xs text-[#151515]">
+            {typeGroups.length} Categories
           </span>
         </div>
 
@@ -178,36 +183,37 @@ export const AnalyticsPanel: React.FC<AnalyticsPanelProps> = ({ onBack }) => {
             <thead>
               <tr className="border-b border-[#151515] text-[#737067] font-mono uppercase text-[10px]">
                 <th className="py-2.5 px-3">Fee Category</th>
-                <th className="py-2.5 px-3 text-right">Audited</th>
-                <th className="py-2.5 px-3 text-right">Recoverable</th>
-                <th className="py-2.5 px-3 text-right">Yield Rate</th>
-                <th className="py-2.5 px-3 text-right">Total Recoverable</th>
+                <th className="py-2.5 px-3 text-right">Charges</th>
+                <th className="py-2.5 px-3 text-right">CLAIM</th>
+                <th className="py-2.5 px-3 text-right">CLAIM Rate</th>
+                <th className="py-2.5 px-3 text-right">CLAIM Amount</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-[#E2DFD7] font-mono">
-              {data.feeTypeBreakdown.map((row) => (
-                <tr key={row.type} className="hover:bg-[#F2EFE8]">
+              {typeGroups.length === 0 ? <tr><td colSpan={5} className="py-8 text-center text-[#737067]">No charge rows were returned.</td></tr> : typeGroups.map(([chargeType, group]) => {
+                const claims = group.filter((charge) => charge.decision === 'CLAIM');
+                return <tr key={chargeType} className="hover:bg-[#F2EFE8]">
                   <td className="py-3 px-3 font-sans font-medium text-[#151515]">
-                    {row.type}
+                    {chargeType}
                   </td>
                   <td className="py-3 px-3 text-right text-[#737067] tabular-nums">
-                    {row.total}
+                    {group.length}
                   </td>
                   <td className="py-3 px-3 text-right text-[#151515] font-semibold tabular-nums">
-                    {row.recoverable}
+                    {claims.length}
                   </td>
                   <td className="py-3 px-3 text-right font-semibold text-[#C64B32] tabular-nums">
-                    {row.yield}%
+                    {group.length === 0 ? '0.0' : (claims.length / group.length * 100).toFixed(1)}%
                   </td>
                   <td className="py-3 px-3 text-right font-bold text-[#151515] tabular-nums">
-                    ₹{row.recoverableAmount.toLocaleString('en-IN')}
+                    {formatAmount(claims)}
                   </td>
-                </tr>
-              ))}
+                </tr>;
+              })}
             </tbody>
           </table>
         </div>
-      </div>
+      </div>}
     </div>
   );
 };

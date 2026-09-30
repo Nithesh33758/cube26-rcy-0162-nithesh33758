@@ -2,8 +2,15 @@
 .env.*
 !.env.example
 node_modules/
+backend/target/
+backend/data/
+*.log
+backend/startup*.txt
+AI model/sample_analysis_results.json
+AI model/.venv/
 __pycache__/
 *.pyc
 .venv/
 venv/
 .DS_Store
+

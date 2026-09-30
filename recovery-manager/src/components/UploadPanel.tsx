@@ -122,21 +122,6 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({ onFileSelected, onErro
     }
   };
 
-  const loadSampleFile = () => {
-    onFileSelected({
-      name: 'demo_fee_report.csv',
-      size: 'Synthetic demo data',
-      type: 'CSV',
-      status: 'Ready for analysis',
-      rowCount: 320,
-      uploadedAt: new Date().toISOString(),
-      detectedColumns: [...EXPECTED_LEDGER_COLUMNS],
-      missingColumns: [],
-      isValidLedger: true,
-      schemaType: 'LEGACY_LEDGER'
-    });
-  };
-
   const loadIncompleteSample = () => {
     const missing = ['fba_shipment_id', 'posted_date'];
     const detected = EXPECTED_LEDGER_COLUMNS.filter((c) => !missing.includes(c));
@@ -229,13 +214,6 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({ onFileSelected, onErro
               className="px-6 py-2.5 bg-[#151515] text-[#F5F3EE] text-sm font-medium hover:bg-[#333333] transition-colors cursor-pointer whitespace-nowrap active:translate-y-[1px]"
             >
               Choose CSV File
-            </button>
-
-            <button
-              onClick={loadSampleFile}
-              className="px-4 py-2.5 border border-[#151515] text-[#151515] text-sm font-medium hover:bg-[#ECE9E2] transition-colors cursor-pointer whitespace-nowrap active:translate-y-[1px]"
-            >
-              Load Demo Ledger (320 synthetic rows)
             </button>
           </div>
 

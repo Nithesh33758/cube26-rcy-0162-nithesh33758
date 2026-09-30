@@ -21,9 +21,16 @@ public class TenantDatabaseScope {
     }
 
     public void applyToCurrentTransaction() {
+        applyToOrg(currentOrgId());
+    }
+
+    public void applyToOrg(String orgId) {
         if (postgres) {
+            if (orgId == null || orgId.isBlank()) {
+                throw new IllegalArgumentException("Organization id must not be blank");
+            }
             entityManager.createNativeQuery("select set_config('app.current_org_id', :orgId, true)")
-                    .setParameter("orgId", currentOrgId())
+                    .setParameter("orgId", orgId)
                     .getSingleResult();
         }
     }

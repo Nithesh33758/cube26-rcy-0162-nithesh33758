@@ -17,18 +17,21 @@ export type ChargeStatus =
   | 'Contradicted'
   | 'Audited'
   | 'Already Reimbursed'
-  | 'Out of Window';
+  | 'Out of Window'
+  | 'Unknown';
 
-export type ManagerType = 'Receiving Manager' | 'Prep Manager' | 'Pack Manager' | 'Returns Manager';
+export type ManagerType = 'Receiving Manager' | 'Prep Manager' | 'Pack Manager' | 'Returns Manager' | 'Unknown Source';
 
 export interface RequirementCheck {
   id: string;
   name: string;
-  category: 'Receiving' | 'Operational' | 'Evidence' | 'SLA';
-  status: RequirementStatus;
+  category: 'Receiving' | 'Operational' | 'Evidence' | 'SLA' | 'Unspecified';
+  status: RequirementStatus | null;
   description: string;
   ruleCode: string;
   details: string;
+  active?: boolean;
+  chargeType?: string;
 }
 
 export interface EvidenceRecord {
@@ -41,7 +44,8 @@ export interface EvidenceRecord {
   description: string;
   metric?: string;
   systemRef: string;
-  status: 'VERIFIED' | 'DISCREPANCY' | 'MISSING' | 'FLAGGED';
+  status: string;
+  requirement?: string;
 }
 
 export interface Charge {
@@ -51,13 +55,21 @@ export interface Charge {
   amount: number;
   currency: string;
   decision: DecisionType;
-  confidence: number;
+  confidence: number | null;
   evidenceCount: number;
   status: ChargeStatus;
   date: string;
   sku: string;
   fulfillmentCenter: string;
   decisionExplanation: string;
+  originalDecision?: DecisionType | null;
+  chargeSubtype?: string | null;
+  shipmentId?: string | null;
+  orderId?: string | null;
+  fnsku?: string | null;
+  asin?: string | null;
+  granularity?: string;
+  description?: string | null;
   billedMetric?: string;
   actualMetric?: string;
   variance?: string;
@@ -65,19 +77,17 @@ export interface Charge {
   evidence: EvidenceRecord[];
 }
 
-export interface ReviewItem {
-  id: string;
-  chargeId: string;
-  unitId: string;
-  chargeType: string;
-  amount: number;
-  originalDecision: DecisionType;
-  reviewedDecision?: DecisionType;
-  reviewReason: string;
-  reviewer: string;
-  timestamp: string;
-  resolutionStatus: 'PENDING' | 'ACCEPTED' | 'REJECTED' | 'ESCALATED';
-  notes?: string;
+export interface AnalysisSummary {
+  totalCharges: number;
+  claimsRecommended: number;
+  rejected: number;
+  uncertain: number;
+  pendingReview: number;
+  contested: number;
+  accepted: number;
+  insufficientEvidence: number;
+  alreadyReimbursed: number;
+  outOfWindow: number;
 }
 
 export type AppState =

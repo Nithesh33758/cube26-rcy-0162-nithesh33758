@@ -1,0 +1,10 @@
+.git
+.github
+.venv
+AI model
+node_modules
+recovery-manager/node_modules
+recovery-manager/dist
+backend/target
+backend/data
+*.log

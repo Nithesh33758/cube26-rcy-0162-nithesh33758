@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Menu, X } from 'lucide-react';
+import { SydonLogo } from './SydonLogo';
 
 export type NavItem = 'Dashboard' | 'Charges' | 'Evidence' | 'Reviews' | 'Analytics';
 
@@ -50,11 +51,9 @@ export const Header: React.FC<HeaderProps> = ({
           <button
             onClick={() => onSelectNav('Charges')}
             className="text-left group cursor-pointer focus:outline-none"
-            title="Recovery Manager Home"
+            title="Sydon Recovery Manager"
           >
-            <span className="font-heading text-xl font-bold tracking-tight text-[#151515] group-hover:text-[#C64B32] transition-colors">
-              Recovery Manager
-            </span>
+            <SydonLogo size="md" />
           </button>
 
           {/* Desktop Horizontal Navigation Bar */}

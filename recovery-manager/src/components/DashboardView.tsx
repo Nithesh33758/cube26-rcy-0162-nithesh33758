@@ -1,9 +1,6 @@
 import React, { useState } from 'react';
-import {
-  DASHBOARD_DATA,
-  RecoveryTrendPoint
-} from '../data/dashboardData';
-import { useInView, useCountUp, useDecimalCountUp } from '../hooks/useInView';
+import { AnalysisSummary, Charge } from '../types';
+import { useInView, useCountUp } from '../hooks/useInView';
 import {
   ArrowRight,
   TrendingUp,
@@ -17,19 +14,109 @@ import {
 } from 'lucide-react';
 
 interface DashboardViewProps {
+  summary: AnalysisSummary | null;
+  charges: Charge[];
   onNavigateToCharges: () => void;
   onNavigateToReviews: () => void;
   onNavigateToEvidence: () => void;
   onNavigateToAnalytics: () => void;
 }
 
+interface TrendPoint {
+  period: string;
+  periodLabel: string;
+  claimsCount: number;
+  rejectedCount: number;
+  uncertainCount: number;
+}
+
+function formatAmounts(charges: Charge[]): string {
+  const totals = charges.reduce<Map<string, number>>((amounts, charge) => {
+    amounts.set(charge.currency, (amounts.get(charge.currency) ?? 0) + charge.amount);
+    return amounts;
+  }, new Map());
+  if (totals.size === 0) return '0';
+  return [...totals.entries()].map(([currency, amount]) =>
+    `${currency} ${amount.toLocaleString(undefined, { maximumFractionDigits: 2 })}`).join(' / ');
+}
+
 export const DashboardView: React.FC<DashboardViewProps> = ({
+  summary,
+  charges,
   onNavigateToCharges,
   onNavigateToReviews,
   onNavigateToEvidence,
   onNavigateToAnalytics
 }) => {
-  const data = DASHBOARD_DATA;
+  const totalCharges = summary?.totalCharges ?? charges.length;
+  const claimsRecommended = summary?.claimsRecommended ?? charges.filter((charge) => charge.decision === 'CLAIM').length;
+  const rejected = summary?.rejected ?? charges.filter((charge) => charge.decision === 'REJECT').length;
+  const uncertain = summary?.uncertain ?? charges.filter((charge) => charge.decision === 'UNCERTAIN').length;
+  const claimCharges = charges.filter((charge) => charge.decision === 'CLAIM');
+  const reviewCharges = charges.filter((charge) => charge.decision === 'UNCERTAIN');
+
+  const chargesByDecision = Array.from(charges.reduce<Map<string, Charge[]>>((groups, charge) => {
+    const group = groups.get(charge.decision) ?? [];
+    group.push(charge);
+    groups.set(charge.decision, group);
+    return groups;
+  }, new Map()));
+  const chargesByType = Array.from(charges.reduce<Map<string, Charge[]>>((groups, charge) => {
+    const group = groups.get(charge.chargeType) ?? [];
+    group.push(charge);
+    groups.set(charge.chargeType, group);
+    return groups;
+  }, new Map()));
+  const monthGroups = Array.from(charges.reduce<Map<string, Charge[]>>((groups, charge) => {
+    const date = new Date(charge.date);
+    if (Number.isNaN(date.getTime())) return groups;
+    const period = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+    const group = groups.get(period) ?? [];
+    group.push(charge);
+    groups.set(period, group);
+    return groups;
+  }, new Map()).entries())
+    .sort(([left], [right]) => left.localeCompare(right))
+    .slice(-7);
+  const trendPoints = monthGroups.map(([period, group]): TrendPoint => ({
+      period,
+      periodLabel: new Date(`${period}-01T00:00:00`).toLocaleDateString(undefined, { month: 'short', year: '2-digit' }),
+      claimsCount: group.filter((charge) => charge.decision === 'CLAIM').length,
+      rejectedCount: group.filter((charge) => charge.decision === 'REJECT').length,
+      uncertainCount: group.filter((charge) => charge.decision === 'UNCERTAIN').length
+    }));
+  const maxTrendCount = Math.max(1, ...trendPoints.flatMap((point) =>
+    [point.claimsCount, point.rejectedCount, point.uncertainCount]));
+  const confidenceValues = charges.map((charge) => charge.confidence)
+    .filter((confidence): confidence is number => confidence !== null);
+  const averageConfidence = confidenceValues.length === 0 ? null
+    : confidenceValues.reduce((total, confidence) => total + confidence, 0) / confidenceValues.length;
+  const chargesWithEvidence = charges.filter((charge) => charge.evidenceCount > 0).length;
+  const chargesWithUnit = charges.filter((charge) => Boolean(charge.unitId)).length;
+  const chargesWithRequirements = charges.filter((charge) => charge.requirements.length > 0).length;
+  const funnelStages = [
+    { title: 'Charges Returned', count: totalCharges, description: 'Charge rows included in the completed analysis response.' },
+    { title: 'Unit IDs Supplied', count: chargesWithUnit, description: 'Returned rows with a unit identifier.' },
+    { title: 'Evidence Attached', count: chargesWithEvidence, description: 'Returned rows with at least one evidence record.' },
+    { title: 'Requirements Attached', count: chargesWithRequirements, description: 'Returned rows with applicable requirements.' },
+    { title: 'CLAIM Decisions', count: claimsRecommended, description: 'Rows classified as CLAIM (actionable recovery).' },
+    { title: 'Review Queue', count: reviewCharges.length, description: 'Uncertain decisions requiring investigation.' }
+  ];
+  const recentCharges = [...charges]
+    .sort((left, right) => right.date.localeCompare(left.date))
+    .slice(0, 4);
+  const trendSvgPoints = trendPoints.map((point, index) => ({
+    ...point,
+    x: trendPoints.length === 1 ? 350 : 50 + (index * 600) / (trendPoints.length - 1),
+    y: 200 - (point.claimsCount / maxTrendCount) * 180
+  }));
+  const trendLinePath = trendSvgPoints.map((point, index) =>
+    `${index === 0 ? 'M' : 'L'} ${point.x},${point.y}`).join(' ');
+  const firstTrendPoint = trendSvgPoints[0];
+  const lastTrendPoint = trendSvgPoints[trendSvgPoints.length - 1];
+  const trendAreaPath = firstTrendPoint && lastTrendPoint
+    ? `${trendLinePath} L ${lastTrendPoint.x},200 L ${firstTrendPoint.x},200 Z`
+    : '';
 
   // Viewport observers for each of the 8 sequential sections
   const [s1Ref, s1InView] = useInView({ threshold: 0.15 });
@@ -41,24 +128,36 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const [s7Ref, s7InView] = useInView({ threshold: 0.15 });
   const [s8Ref, s8InView] = useInView({ threshold: 0.15 });
 
-  // Section 1 animated count-ups
-  const countCharges = useCountUp(1248, 800, s1InView);
-  const countRecoveryLakhs = useDecimalCountUp(8.42, 2, 800, s1InView);
-  const countClaims = useCountUp(428, 800, s1InView);
-  const countUncertain = useCountUp(208, 800, s1InView);
-  const countPrecision = useDecimalCountUp(91.4, 1, 800, s1InView);
+  const countCharges = useCountUp(totalCharges, 800, s1InView);
+  const countClaims = useCountUp(claimsRecommended, 800, s1InView);
+  const countRejected = useCountUp(rejected, 800, s1InView);
+  const countUncertain = useCountUp(uncertain, 800, s1InView);
 
-  // Section 8 animated count-ups
-  const s8Charges = useCountUp(1248, 700, s8InView);
-  const s8Claims = useCountUp(428, 700, s8InView);
-  const s8Recovery = useDecimalCountUp(8.42, 2, 700, s8InView);
-  const s8Uncertain = useCountUp(208, 700, s8InView);
-  const s8Precision = useDecimalCountUp(91.4, 1, 700, s8InView);
+  const s8Charges = useCountUp(totalCharges, 700, s8InView);
+  const s8Claims = useCountUp(claimsRecommended, 700, s8InView);
+  const s8Rejected = useCountUp(rejected, 700, s8InView);
+  const s8Uncertain = useCountUp(uncertain, 700, s8InView);
 
-  // Section 3 interactive hover point for the Recovery Trend line chart
-  const [activeTrendPoint, setActiveTrendPoint] = useState<RecoveryTrendPoint | null>(
-    data.trend[data.trend.length - 1]
-  );
+  const [activeTrendPeriod, setActiveTrendPeriod] = useState<string | null>(null);
+  const activeTrendPoint = trendSvgPoints.find((point) => point.period === activeTrendPeriod)
+    ?? trendPoints[trendPoints.length - 1]
+    ?? null;
+
+  if (!summary) {
+    return (
+      <div className="max-w-7xl mx-auto px-6 py-12">
+        <div className="pb-8 border-b border-[#151515] mb-8">
+          <div className="text-xs uppercase tracking-widest text-[#737067] font-mono mb-2">Executive Financial Operations Ledger</div>
+          <h1 className="font-heading text-4xl sm:text-6xl font-bold tracking-tight text-[#151515] mb-4">Recovery Intelligence</h1>
+          <p className="text-lg text-[#55524B] max-w-3xl leading-relaxed">Dashboard metrics appear here after a CSV report has completed backend analysis.</p>
+        </div>
+        <div className="border border-[#151515] bg-[#FAF8F5] p-8 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <span className="text-sm text-[#55524B]">No completed analysis is loaded.</span>
+          <button onClick={onNavigateToCharges} className="px-5 py-2.5 bg-[#151515] text-[#F5F3EE] text-sm font-semibold hover:bg-[#333333] transition-colors cursor-pointer">Upload Recovery Report</button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-7xl mx-auto px-6 py-12 space-y-28 selection:bg-[#C64B32] selection:text-white">
@@ -79,12 +178,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             Recovery Intelligence
           </h1>
           <p className="text-lg sm:text-xl text-[#55524B] max-w-3xl leading-relaxed">
-            A centralized operational dossier summarizing disputed fulfillment charges, upstream warehouse evidence, deterministic decisions, and verified capital recovery.
+            Summary of charge decisions and evidence returned by the completed backend analysis.
           </p>
         </div>
 
-        {/* Headline Numbers Grid */}
-        <div className="grid grid-cols-2 lg:grid-cols-5 border border-[#151515] bg-[#FAF8F5] divide-y lg:divide-y-0 lg:divide-x divide-[#151515]">
+        {/* Headline Numbers Grid - 3 Outputs: Claim, Reject, Uncertain */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 border border-[#151515] bg-[#FAF8F5] divide-y sm:divide-y-0 sm:divide-x divide-[#151515]">
           {/* Total Charges */}
           <div className="p-6">
             <span className="text-[11px] font-mono uppercase tracking-wider text-[#737067] block mb-1">
@@ -94,59 +193,46 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               {s1InView ? countCharges.toLocaleString() : '0'}
             </div>
             <div className="text-xs font-mono text-[#737067] mt-1">
-              Ledger intake batch
+              From backend summary
             </div>
           </div>
 
-          {/* Potential Recovery */}
-          <div className="p-6 bg-[#FAF3F1]">
-            <span className="text-[11px] font-mono uppercase tracking-wider text-[#C64B32] font-semibold block mb-1">
-              Potential Recovery
+          {/* Claim */}
+          <div className="p-6 bg-emerald-50/60">
+            <span className="text-[11px] font-mono uppercase tracking-wider text-emerald-800 font-semibold block mb-1">
+              Claim
             </span>
-            <div className="font-heading text-3xl sm:text-4xl font-bold text-[#C64B32] tabular-nums">
-              ₹{s1InView ? countRecoveryLakhs.toFixed(2) : '0.00'}L
-            </div>
-            <div className="text-xs font-mono text-[#C64B32] font-medium mt-1">
-              ₹8,42,500 total value
-            </div>
-          </div>
-
-          {/* Claims Recommended */}
-          <div className="p-6">
-            <span className="text-[11px] font-mono uppercase tracking-wider text-[#737067] block mb-1">
-              Claims Recommended
-            </span>
-            <div className="font-heading text-3xl sm:text-4xl font-bold text-[#151515] tabular-nums">
+            <div className="font-heading text-3xl sm:text-4xl font-bold text-emerald-800 tabular-nums">
               {s1InView ? countClaims : '0'}
             </div>
+            <div className="text-xs font-mono text-emerald-800 font-medium mt-1">
+              {formatAmounts(claimCharges)} recoverable
+            </div>
+          </div>
+
+          {/* Reject */}
+          <div className="p-6">
+            <span className="text-[11px] font-mono uppercase tracking-wider text-[#737067] block mb-1">
+              Reject
+            </span>
+            <div className="font-heading text-3xl sm:text-4xl font-bold text-[#151515] tabular-nums">
+              {s1InView ? countRejected : '0'}
+            </div>
             <div className="text-xs font-mono text-[#737067] mt-1">
-              34.3% recovery rate
+              Legitimate charges verified
             </div>
           </div>
 
           {/* Uncertain */}
-          <div className="p-6">
-            <span className="text-[11px] font-mono uppercase tracking-wider text-[#737067] block mb-1">
+          <div className="p-6 bg-amber-50/60">
+            <span className="text-[11px] font-mono uppercase tracking-wider text-amber-900 font-semibold block mb-1">
               Uncertain
             </span>
-            <div className="font-heading text-3xl sm:text-4xl font-bold text-[#55524B] tabular-nums">
+            <div className="font-heading text-3xl sm:text-4xl font-bold text-amber-900 tabular-nums">
               {s1InView ? countUncertain : '0'}
             </div>
-            <div className="text-xs font-mono text-[#737067] mt-1">
-              Requires audit review
-            </div>
-          </div>
-
-          {/* Claim Precision */}
-          <div className="p-6 col-span-2 lg:col-span-1 bg-[#151515] text-[#F5F3EE]">
-            <span className="text-[11px] font-mono uppercase tracking-wider text-[#A8A49B] block mb-1">
-              Claim Precision
-            </span>
-            <div className="font-heading text-3xl sm:text-4xl font-bold text-[#F5F3EE] tabular-nums">
-              {s1InView ? countPrecision.toFixed(1) : '0.0'}%
-            </div>
-            <div className="text-xs font-mono text-[#A8A49B] mt-1">
-              Zero clawback policy
+            <div className="text-xs font-mono text-amber-800 mt-1">
+              Requires manual review
             </div>
           </div>
         </div>
@@ -171,7 +257,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </h2>
           </div>
           <span className="text-xs font-mono text-[#737067]">
-            Active Settlement Batch · March 2026
+            Completed backend analysis
           </span>
         </div>
 
@@ -181,25 +267,25 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             {/* Left Narrative Pillar (7 cols) */}
             <div className="lg:col-span-7 space-y-6">
               <div className="font-heading text-xl sm:text-2xl font-bold text-[#151515] leading-snug">
-                One-third of audited fulfillment fees demonstrate quantifiable deviations from calibrated warehouse physical logs.
+                {totalCharges} charges returned across {chargesByType.length} charge types.
               </div>
 
               <p className="text-sm text-[#55524B] leading-relaxed">
-                Out of 1,248 transactions processed across 4 fulfillment hubs (BLR1, DEL2, BOM1, and HYD1), 428 charges exhibited conclusive discrepancies between carrier billing tiers and physical station telemetry. The primary overcharge mechanisms isolated are phantom volumetric height adjustments (+340% cubic expansion) and baseline poly-mailer packaging billed at parcel rates.
+                The backend summary reports {claimsRecommended} CLAIM decisions, {rejected} REJECT decisions, and {uncertain} UNCERTAIN decisions.
               </p>
 
               <div className="pt-4 border-t border-[#E2DFD7] flex flex-wrap items-center gap-6 text-xs font-mono">
                 <div className="flex items-center gap-2">
                   <span className="w-2 h-2 rounded-full bg-emerald-600"></span>
-                  <span className="text-[#151515] font-semibold">97.3% Unit Matching Rate</span>
+                  <span className="text-[#151515] font-semibold">{chargesWithUnit} charges with unit IDs</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="w-2 h-2 rounded-full bg-[#C64B32]"></span>
-                  <span className="text-[#151515] font-semibold">₹8.42L Actionable Capital</span>
+                  <span className="text-[#151515] font-semibold">{chargesWithEvidence} charges with evidence</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="w-2 h-2 rounded-full bg-[#737067]"></span>
-                  <span className="text-[#151515] font-semibold">16.7% Uncertain Tolerance</span>
+                  <span className="text-[#151515] font-semibold">{chargesWithRequirements} charges with requirements</span>
                 </div>
               </div>
             </div>
@@ -213,20 +299,20 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               <div className="space-y-4 text-xs font-mono">
                 <div>
                   <div className="text-[#737067] uppercase text-[10px]">Gross Ingested Ledger</div>
-                  <div className="text-xl font-bold text-[#151515] mt-0.5">₹24,86,500</div>
-                  <div className="text-[#737067] text-[11px] mt-0.5">1,248 individual transactions examined</div>
+                  <div className="text-xl font-bold text-[#151515] mt-0.5">{formatAmounts(charges)}</div>
+                  <div className="text-[#737067] text-[11px] mt-0.5">{totalCharges} returned charge rows</div>
                 </div>
 
                 <div className="pt-3 border-t border-[#E2DFD7]">
-                  <div className="text-[#737067] uppercase text-[10px]">Deterministic Recovery Yield</div>
-                  <div className="text-xl font-bold text-[#C64B32] mt-0.5">34.3% (₹8.42L)</div>
-                  <div className="text-[#737067] text-[11px] mt-0.5">Dual-sensor corroborated dispute value</div>
+                  <div className="text-[#737067] uppercase text-[10px]">CLAIM Decision Amount</div>
+                  <div className="text-xl font-bold text-[#C64B32] mt-0.5">{formatAmounts(claimCharges)}</div>
+                  <div className="text-[#737067] text-[11px] mt-0.5">Sum of amounts on CLAIM decision rows</div>
                 </div>
 
                 <div className="pt-3 border-t border-[#E2DFD7]">
-                  <div className="text-[#737067] uppercase text-[10px]">Dispute Confidence Index</div>
-                  <div className="text-xl font-bold text-emerald-800 mt-0.5">91.4% Verified Precision</div>
-                  <div className="text-[#737067] text-[11px] mt-0.5">6 adjusted / 178 validated without pushback</div>
+                  <div className="text-[#737067] uppercase text-[10px]">Average Supplied Confidence</div>
+                  <div className="text-xl font-bold text-emerald-800 mt-0.5">{averageConfidence === null ? 'Not available' : `${averageConfidence.toFixed(1)}%`}</div>
+                  <div className="text-[#737067] text-[11px] mt-0.5">{confidenceValues.length} charges supplied confidence</div>
                 </div>
               </div>
             </div>
@@ -249,10 +335,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               Section 03 · Visualization 01 of 02
             </div>
             <h2 className="font-heading text-2xl sm:text-3xl font-bold text-[#151515]">
-              Recovery Value Over Time
+              CLAIM Decisions by Charge Date
             </h2>
             <p className="text-sm text-[#55524B] mt-1 max-w-xl">
-              Clean line visualization communicating whether recoverable capital yields are accelerating across recent audit cycles.
+              Monthly charge counts for rows the backend classified as CLAIM.
             </p>
           </div>
 
@@ -263,12 +349,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 <span className="text-[#151515] font-semibold">{activeTrendPoint.periodLabel}</span>
               </div>
               <div>
-                <span className="text-[#737067] uppercase block text-[10px]">Recovered Value</span>
-                <span className="text-[#C64B32] font-bold text-sm">₹{activeTrendPoint.recoveryValue}k</span>
+                <span className="text-[#737067] uppercase block text-[10px]">CLAIM Decisions</span>
+                <span className="text-[#C64B32] font-bold text-sm">{activeTrendPoint.claimsCount}</span>
               </div>
               <div>
-                <span className="text-[#737067] uppercase block text-[10px]">Precision</span>
-                <span className="text-[#151515] font-semibold">{activeTrendPoint.precision}%</span>
+                <span className="text-[#737067] uppercase block text-[10px]">Rejected</span>
+                <span className="text-[#151515] font-semibold">{activeTrendPoint.rejectedCount}</span>
               </div>
             </div>
           )}
@@ -276,6 +362,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
         {/* Visualization 1 Frame */}
         <div className="border border-[#151515] bg-[#FAF8F5] p-6 sm:p-10 space-y-6">
+          {trendPoints.length === 0 && (
+            <p className="text-sm text-[#737067]">No valid charge dates were returned for a monthly trend.</p>
+          )}
           <div className="relative h-64 sm:h-72 w-full">
             <svg
               className="w-full h-full overflow-visible"
@@ -289,21 +378,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               <line x1="0" y1="200" x2="700" y2="200" stroke="#151515" strokeWidth="1" />
 
               {/* Y Axis Labels */}
-              <text x="5" y="16" fill="#8E8B83" fontSize="10" fontFamily="IBM Plex Mono">₹200k</text>
-              <text x="5" y="76" fill="#8E8B83" fontSize="10" fontFamily="IBM Plex Mono">₹140k</text>
-              <text x="5" y="136" fill="#8E8B83" fontSize="10" fontFamily="IBM Plex Mono">₹80k</text>
-              <text x="5" y="196" fill="#8E8B83" fontSize="10" fontFamily="IBM Plex Mono">₹0k</text>
+              <text x="5" y="16" fill="#8E8B83" fontSize="10" fontFamily="IBM Plex Mono">{maxTrendCount}</text>
+              <text x="5" y="76" fill="#8E8B83" fontSize="10" fontFamily="IBM Plex Mono">{Math.round(maxTrendCount * 2 / 3)}</text>
+              <text x="5" y="136" fill="#8E8B83" fontSize="10" fontFamily="IBM Plex Mono">{Math.round(maxTrendCount / 3)}</text>
+              <text x="5" y="196" fill="#8E8B83" fontSize="10" fontFamily="IBM Plex Mono">0</text>
 
               {/* Shaded Area under Curve */}
               <path
-                d={`M 50,${200 - (64 / 200) * 180}
-                    L 150,${200 - (88 / 200) * 180}
-                    L 250,${200 - (95 / 200) * 180}
-                    L 350,${200 - (122 / 200) * 180}
-                    L 450,${200 - (148 / 200) * 180}
-                    L 550,${200 - (136 / 200) * 180}
-                    L 650,${200 - (189 / 200) * 180}
-                    L 650,200 L 50,200 Z`}
+                d={trendAreaPath}
                 fill="#C64B32"
                 fillOpacity={s3InView ? "0.07" : "0"}
                 className="transition-opacity duration-1000 ease-out"
@@ -311,13 +393,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
               {/* Progressive SVG Path Animation */}
               <path
-                d={`M 50,${200 - (64 / 200) * 180}
-                    L 150,${200 - (88 / 200) * 180}
-                    L 250,${200 - (95 / 200) * 180}
-                    L 350,${200 - (122 / 200) * 180}
-                    L 450,${200 - (148 / 200) * 180}
-                    L 550,${200 - (136 / 200) * 180}
-                    L 650,${200 - (189 / 200) * 180}`}
+                d={trendLinePath}
                 fill="none"
                 stroke="#C64B32"
                 strokeWidth="3"
@@ -331,16 +407,16 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               />
 
               {/* Data Node Markers */}
-              {data.trend.map((pt, i) => {
-                const cx = 50 + i * 100;
-                const cy = 200 - (pt.recoveryValue / 200) * 180;
+              {trendSvgPoints.map((pt, i) => {
+                const cx = pt.x;
+                const cy = pt.y;
                 const isActive = activeTrendPoint?.period === pt.period;
 
                 return (
                   <g
                     key={pt.period}
                     className="cursor-pointer group"
-                    onMouseEnter={() => setActiveTrendPoint(pt)}
+                    onMouseEnter={() => setActiveTrendPeriod(pt.period)}
                   >
                     <circle
                       cx={cx}
@@ -372,9 +448,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-4 border-t border-[#E2DFD7] text-xs font-mono text-[#737067]">
             <div className="flex items-center gap-2">
               <span className="w-2.5 h-0.5 bg-[#C64B32] inline-block"></span>
-              <span>Recovery Value Progression (₹ Thousands)</span>
+              <span>CLAIM decision count by charge month</span>
             </div>
-            <span>Trajectory: +195% quarterly growth in resolved fee recovery</span>
+            <span>{trendPoints.length} date periods available</span>
           </div>
         </div>
       </section>
@@ -396,7 +472,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             Decision Overview
           </h2>
           <p className="text-sm text-[#55524B] mt-1 max-w-xl">
-            Classification distribution communicating how the deterministic audit engine partitions incoming charges.
+            Distribution of the exact decision values returned for this analysis.
           </p>
         </div>
 
@@ -404,76 +480,30 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           {/* Restrained Visualization 2: Single Proportion Segment Bar */}
           <div className="space-y-2">
             <div className="h-6 w-full flex overflow-hidden border border-[#151515] bg-[#EAE6DD]">
-              <div
-                className="bg-[#C64B32] transition-all duration-1000 ease-out"
-                style={{ width: s4InView ? '34.3%' : '0%' }}
-                title="CLAIM: 34.3% (428 charges)"
-              />
-              <div
-                className="bg-[#151515] transition-all duration-1000 ease-out"
-                style={{ width: s4InView ? '49.0%' : '0%' }}
-                title="REJECT: 49.0% (612 charges)"
-              />
-              <div
-                className="bg-[#737067] transition-all duration-1000 ease-out"
-                style={{ width: s4InView ? '16.7%' : '0%' }}
-                title="UNCERTAIN: 16.7% (208 charges)"
-              />
+              {chargesByDecision.map(([decision, group]) => {
+                const color = decision === 'CLAIM' ? '#166534'
+                  : decision === 'REJECT' ? '#151515' : '#D97706';
+                const width = totalCharges === 0 ? 0 : (group.length / totalCharges) * 100;
+                return <div key={decision} className="transition-all duration-1000 ease-out" style={{ width: s4InView ? `${width}%` : '0%', backgroundColor: color }} title={`${decision}: ${group.length} charges`} />;
+              })}
             </div>
 
-            <div className="flex items-center justify-between text-xs font-mono text-[#737067] pt-1">
-              <span className="text-[#C64B32] font-semibold">34.3% CLAIM</span>
-              <span className="text-[#151515] font-semibold">49.0% REJECT</span>
-              <span className="text-[#737067] font-semibold">16.7% UNCERTAIN</span>
+            <div className="flex flex-wrap items-center gap-4 text-xs font-mono text-[#737067] pt-1">
+              {chargesByDecision.map(([decision, group]) => (
+                <span key={decision} className="font-semibold">{decision.replaceAll('_', ' ')}: {group.length}</span>
+              ))}
             </div>
           </div>
 
           {/* Textual Interpretation beside/underneath rather than another graph */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-4 border-t border-[#E2DFD7]">
-            {/* 428 Claims Recommended */}
-            <div className="p-4 bg-[#F5F3EE] border-l-2 border-[#C64B32] space-y-1.5">
-              <div className="font-heading text-lg font-bold text-[#151515]">
-                428 Claims Recommended
+            {chargesByDecision.map(([decision, group]) => (
+              <div key={decision} className="p-4 bg-[#F5F3EE] border-l-2 border-[#C64B32] space-y-1.5">
+                <div className="font-heading text-lg font-bold text-[#151515]">{group.length} {decision.replaceAll('_', ' ')}</div>
+                <p className="text-xs text-[#55524B] leading-relaxed">Returned by the backend for this analysis.</p>
+                <div className="text-xs font-mono font-semibold text-[#C64B32] pt-1">{formatAmounts(group)}</div>
               </div>
-              <p className="text-xs text-[#55524B] leading-relaxed">
-                Supported by available operational evidence and applicable contractual requirements. Physical scale discrepancies exceed allowable baseline thresholds.
-              </p>
-              <div className="text-xs font-mono font-semibold text-[#C64B32] pt-1">
-                Yield: ₹4,38,600
-              </div>
-            </div>
-
-            {/* 612 Rejected */}
-            <div className="p-4 bg-[#F5F3EE] border-l-2 border-[#151515] space-y-1.5">
-              <div className="font-heading text-lg font-bold text-[#151515]">
-                612 Rejected
-              </div>
-              <p className="text-xs text-[#55524B] leading-relaxed">
-                Evidence or requirements do not support recovery. Station measurements align with billed fee tiers within the allowable 2.5% calibration margin.
-              </p>
-              <div className="text-xs font-mono font-semibold text-[#151515] pt-1">
-                Supported: ₹2,96,400
-              </div>
-            </div>
-
-            {/* 208 Uncertain */}
-            <div className="p-4 bg-[#F5F3EE] border-l-2 border-[#737067] space-y-1.5">
-              <div className="font-heading text-lg font-bold text-[#151515]">
-                208 Uncertain
-              </div>
-              <p className="text-xs text-[#55524B] leading-relaxed">
-                Requires human review because evidence or requirements are incomplete or contradictory between shift logs. Preserves seller credibility.
-              </p>
-              <div className="text-xs font-mono font-semibold text-[#55524B] pt-1">
-                Triage Ledger: ₹1,07,500
-              </div>
-            </div>
-          </div>
-
-          {/* Explicit Mock Data Indicator */}
-          <div className="pt-2 text-[11px] font-mono text-[#8E8B83] flex items-center justify-between border-t border-[#E2DFD7]">
-            <span>Simulation Mode: Demonstrating verified deterministic classification logic</span>
-            <span>Dataset: 1,248 Records</span>
+            ))}
           </div>
         </div>
       </section>
@@ -501,44 +531,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
         {/* Large Sequential Visual Progression (No graph slop) */}
         <div className="border border-[#151515] bg-[#FAF8F5] p-6 sm:p-10 space-y-3">
-          {[
-            {
-              step: '01',
-              title: 'Charges',
-              metric: '1,248 Transactions',
-              desc: 'Raw fee and reimbursement ledger ingested from carrier and settlement reports.'
-            },
-            {
-              step: '02',
-              title: 'Units Matched',
-              metric: '1,214 Units (97.3%)',
-              desc: 'Serials mapped to catalog product master, package specifications, and bin locations.'
-            },
-            {
-              step: '03',
-              title: 'Evidence Retrieved',
-              metric: '1,142 Units (91.5%)',
-              desc: 'Optical tare logs, Cubiscan dimensions, and carrier gate signatures pulled into audit dossier.'
-            },
-            {
-              step: '04',
-              title: 'Requirements Checked',
-              metric: '524 Charges (42.0%)',
-              desc: 'Contractual dispute clauses and tolerance boundaries evaluated across all operational events.'
-            },
-            {
-              step: '05',
-              title: 'Claims Recommended',
-              metric: '428 Claims (34.3%)',
-              desc: 'Authoritative recovery filings certified with verified dual-sensor telemetry proof.'
-            },
-            {
-              step: '06',
-              title: 'Recovery Value',
-              metric: '₹8.42 Lakhs Realized',
-              desc: 'High-confidence recoverable capital secured without clawback risk or carrier dispute penalties.'
-            }
-          ].map((stage, idx, arr) => {
+          {funnelStages.map((stage, idx, arr) => {
             const isLast = idx === arr.length - 1;
 
             return (
@@ -564,7 +557,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                         isLast ? 'bg-[#C64B32] text-white' : 'bg-[#151515] text-[#F5F3EE]'
                       }`}
                     >
-                      {stage.step}
+                      {String(idx + 1).padStart(2, '0')}
                     </span>
 
                     <div>
@@ -576,7 +569,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                         {stage.title}
                       </span>
                       <p className="text-xs text-[#55524B] mt-0.5 max-w-xl">
-                        {stage.desc}
+                        {stage.description}
                       </p>
                     </div>
                   </div>
@@ -586,7 +579,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                       isLast ? 'text-[#C64B32]' : 'text-[#151515]'
                     }`}
                   >
-                    {stage.metric}
+                    {stage.count} ({totalCharges === 0 ? '0.0' : (stage.count / totalCharges * 100).toFixed(1)}%)
                   </div>
                 </div>
 
@@ -619,7 +612,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               Review Queue
             </h2>
             <p className="text-sm text-[#55524B] mt-1 max-w-xl">
-              Items requiring human attention due to incomplete or contradictory warehouse evidence.
+              Backend decisions returned for human review or follow-up.
             </p>
           </div>
 
@@ -635,14 +628,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         {/* Compact Table / List */}
         <div className="border border-[#151515] bg-[#FAF8F5] p-6 sm:p-8 space-y-6">
           <div className="flex flex-wrap items-center gap-3 pb-4 border-b border-[#E2DFD7]">
-            <span className="text-xs font-mono bg-[#EAE6DD] text-[#151515] px-2.5 py-1 font-semibold border border-[#D5D1C7]">
-              12 Uncertain Cases
+            <span className="text-xs font-mono bg-amber-50 text-amber-900 px-2.5 py-1 font-semibold border border-amber-300">
+              {summary.uncertain} Uncertain Decisions
             </span>
-            <span className="text-xs font-mono bg-[#FAF3F1] text-[#C64B32] px-2.5 py-1 font-semibold border border-[#F0D5D0]">
-              5 Missing Evidence
-            </span>
-            <span className="text-xs font-mono bg-[#F7EBE8] text-[#9C3824] px-2.5 py-1 font-semibold border border-[#E9C4BC]">
-              3 Contradictions
+            <span className="text-xs font-mono bg-[#FAF8F5] text-[#737067] px-2.5 py-1 font-semibold border border-[#D5D1C7]">
+              {charges.filter((charge) => charge.evidenceCount === 0).length} With No Evidence Records
             </span>
           </div>
 
@@ -654,40 +644,32 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   <th className="py-2.5 px-3">Unit ID</th>
                   <th className="py-2.5 px-3">Discrepancy / Issue</th>
                   <th className="py-2.5 px-3 text-right">Amount</th>
-                  <th className="py-2.5 px-3 text-right">Status</th>
+                  <th className="py-2.5 px-3 text-center">Decision</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#E2DFD7] font-mono">
-                {data.reviewQueue.items.map((item) => (
+                {reviewCharges.length === 0 ? (
+                  <tr><td colSpan={5} className="py-8 text-center text-[#737067]">No review decisions in this analysis.</td></tr>
+                ) : reviewCharges.slice(0, 8).map((item) => (
                   <tr
-                    key={item.chargeId}
+                    key={item.id}
                     onClick={onNavigateToReviews}
                     className="hover:bg-[#F2EFE8] cursor-pointer transition-colors"
                   >
                     <td className="py-3 px-3 font-bold text-[#151515]">
-                      {item.chargeId}
+                      {item.id}
                     </td>
                     <td className="py-3 px-3 text-[#737067]">
                       {item.unitId}
                     </td>
                     <td className="py-3 px-3 font-sans font-medium text-[#151515] max-w-sm truncate">
-                      {item.issue}
+                      {item.decisionExplanation}
                     </td>
                     <td className="py-3 px-3 text-right font-bold text-[#151515] tabular-nums">
-                      {item.currency}{item.amount.toFixed(2)}
+                      {formatAmounts([item])}
                     </td>
-                    <td className="py-3 px-3 text-right">
-                      <span
-                        className={`text-[10px] px-2 py-0.5 border ${
-                          item.status === 'Missing Evidence'
-                            ? 'border-[#C64B32] text-[#C64B32] bg-[#FAF3F1]'
-                            : item.status === 'Contradicted'
-                            ? 'border-[#9C3824] text-[#9C3824] bg-[#F7EBE8]'
-                            : 'border-[#8C8980] text-[#737067] bg-[#FAF8F5]'
-                        }`}
-                      >
-                        {item.status}
-                      </span>
+                    <td className="py-3 px-3 text-center">
+                      <DecisionBadge decision={item.decision} size="sm" />
                     </td>
                   </tr>
                 ))}
@@ -696,7 +678,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
 
           <div className="pt-2 flex items-center justify-between text-xs text-[#737067]">
-            <span>Immutable review protocol: Original findings preserved for dispute records</span>
+            <span>Review list derived from current backend decisions</span>
             <button
               onClick={onNavigateToReviews}
               className="font-mono text-[#151515] hover:text-[#C64B32] font-semibold flex items-center gap-1 cursor-pointer"
@@ -722,47 +704,20 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             Section 07 · Operational Audit Log
           </div>
           <h2 className="font-heading text-2xl sm:text-3xl font-bold text-[#151515]">
-            Recent Recovery Activity
+            Recent Analysis Results
           </h2>
           <p className="text-sm text-[#55524B] mt-1 max-w-xl">
-            Live sequential feed of recent charges analyzed, evidence telemetry matches, and review items queued.
+            Most recent charge rows returned by the backend analysis.
           </p>
         </div>
 
         <div className="border border-[#151515] bg-[#FAF8F5] p-6 sm:p-10">
           <div className="relative pl-6 space-y-6 before:absolute before:left-2 before:top-2 before:bottom-2 before:w-[1px] before:bg-[#151515]">
-            {[
-              {
-                time: '09:42',
-                action: '18 charges analyzed',
-                detail: 'Pack station scale logs correlated against carrier invoices. 12 claims validated at FC-BLR1.',
-                tag: 'Analysis Complete',
-                highlight: true
-              },
-              {
-                time: '09:38',
-                action: 'Evidence retrieved for 42 units',
-                detail: 'Optical tare verification certificates synchronized from gate docks 2 and 4.',
-                tag: 'Evidence Synced',
-                highlight: false
-              },
-              {
-                time: '09:31',
-                action: '12 uncertain cases added to review',
-                detail: 'Contradictory salvage condition classifications flagged for human audit determination.',
-                tag: 'Triage Queue',
-                highlight: false
-              },
-              {
-                time: '09:24',
-                action: 'Recovery analysis completed',
-                detail: 'Batch #2026-03B completed through deterministic SLA rules engine. ₹1.89L recovered.',
-                tag: 'Batch Finalized',
-                highlight: true
-              }
-            ].map((activity, idx) => (
+            {recentCharges.length === 0 ? (
+              <p className="text-sm text-[#737067]">No charge rows were returned.</p>
+            ) : recentCharges.map((activity, idx) => (
               <div
-                key={activity.time}
+                key={activity.id}
                 className="relative transition-all duration-500 transform"
                 style={{
                   opacity: s7InView ? 1 : 0,
@@ -773,7 +728,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 {/* Node pin */}
                 <div
                   className={`absolute -left-[27px] top-1.5 w-2.5 h-2.5 rounded-none ${
-                    activity.highlight ? 'bg-[#C64B32]' : 'bg-[#151515]'
+                    activity.decision === 'CLAIM' ? 'bg-[#C64B32]' : 'bg-[#151515]'
                   }`}
                 />
 
@@ -781,18 +736,18 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   <div className="space-y-0.5">
                     <div className="flex items-center gap-3">
                       <span className="font-mono text-xs font-bold text-[#151515]">
-                        {activity.time}
+                        {activity.date || 'Date not supplied'}
                       </span>
                       <span className="font-heading text-sm font-semibold text-[#151515]">
-                        — {activity.action}
+                        — {activity.id} · {activity.decision.replaceAll('_', ' ')}
                       </span>
                       <span className="font-mono text-[10px] uppercase text-[#737067] bg-[#EAE6DD] px-1.5 py-0.2">
-                        {activity.tag}
+                        Backend Result
                       </span>
                     </div>
 
                     <p className="text-xs text-[#55524B] leading-relaxed">
-                      {activity.detail}
+                      {activity.decisionExplanation || 'No explanation was supplied by the backend.'}
                     </p>
                   </div>
                 </div>
@@ -820,12 +775,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               Recovery at a glance
             </h2>
             <p className="text-sm sm:text-base text-[#C5C2BA] leading-relaxed max-w-2xl">
-              Deterministic, audit-grade ecommerce recovery engine. Isolating non-compliant warehouse overcharges and recovering lost capital with zero carrier friction.
+              Decision counts and charge details from the currently loaded backend analysis. No precision estimate is shown without independent audit labels.
             </p>
           </div>
 
           {/* Key Summary Numbers with Viewport Count-ups */}
-          <div className="grid grid-cols-2 sm:grid-cols-5 gap-6 pt-6 border-t border-[#333333] text-xs font-mono">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-6 pt-6 border-t border-[#333333] text-xs font-mono">
             <div>
               <span className="text-[#8E8B83] block uppercase text-[10px] mb-1">
                 Charges Analyzed
@@ -836,38 +791,29 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </div>
 
             <div>
-              <span className="text-[#8E8B83] block uppercase text-[10px] mb-1">
-                Claims Recommended
+              <span className="text-emerald-400 block uppercase text-[10px] mb-1">
+                Claim Decisions
               </span>
-              <span className="text-white text-2xl font-bold font-heading tabular-nums">
+              <span className="text-emerald-400 text-2xl font-bold font-heading tabular-nums">
                 {s8InView ? s8Claims : '0'}
               </span>
             </div>
 
             <div>
               <span className="text-[#8E8B83] block uppercase text-[10px] mb-1">
-                Potential Recovery
-              </span>
-              <span className="text-[#E57373] text-2xl font-bold font-heading tabular-nums">
-                ₹{s8InView ? s8Recovery.toFixed(2) : '0.00'}L
-              </span>
-            </div>
-
-            <div>
-              <span className="text-[#8E8B83] block uppercase text-[10px] mb-1">
-                Uncertain Cases
-              </span>
-              <span className="text-[#C5C2BA] text-2xl font-bold font-heading tabular-nums">
-                {s8InView ? s8Uncertain : '0'}
-              </span>
-            </div>
-
-            <div>
-              <span className="text-[#8E8B83] block uppercase text-[10px] mb-1">
-                Claim Precision
+                Reject Decisions
               </span>
               <span className="text-white text-2xl font-bold font-heading tabular-nums">
-                {s8InView ? s8Precision.toFixed(1) : '0.0'}%
+                {s8InView ? s8Rejected : '0'}
+              </span>
+            </div>
+
+            <div>
+              <span className="text-amber-400 block uppercase text-[10px] mb-1">
+                Uncertain Cases
+              </span>
+              <span className="text-amber-400 text-2xl font-bold font-heading tabular-nums">
+                {s8InView ? s8Uncertain : '0'}
               </span>
             </div>
           </div>

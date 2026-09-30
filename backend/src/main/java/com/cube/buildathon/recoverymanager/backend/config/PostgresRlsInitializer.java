@@ -2,6 +2,7 @@ package com.cube.buildathon.recoverymanager.backend.config;
 
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
+import org.springframework.core.annotation.Order;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
@@ -11,9 +12,11 @@ import java.sql.SQLException;
 import java.util.List;
 
 @Component
+@Order(1)
 public class PostgresRlsInitializer implements ApplicationRunner {
     private static final List<String> TENANT_TABLES = List.of(
-            "analysis_runs", "charges", "decisions", "validation_issues", "evidence_records", "requirements"
+            "analysis_runs", "charges", "decisions", "validation_issues", "evidence_records", "requirements",
+            "reimbursements_received"
     );
 
     private final DataSource dataSource;

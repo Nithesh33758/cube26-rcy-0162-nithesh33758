@@ -26,6 +26,7 @@ export const ChargeTable: React.FC<ChargeTableProps> = ({
 
   const uniqueFeeTypes = Array.from(new Set(charges.map((c) => c.chargeType)));
   const uniqueDecisions = Array.from(new Set(charges.map((charge) => charge.decision)));
+  const reviewQueueCount = charges.filter((charge) => charge.decision === 'UNCERTAIN').length;
 
   // Filter charges
   const filteredCharges = charges.filter((charge) => {
@@ -81,9 +82,10 @@ export const ChargeTable: React.FC<ChargeTableProps> = ({
             className="border border-[#E2DFD7] bg-[#F5F3EE] px-3 py-1.5 text-xs text-[#151515] font-mono focus:outline-none cursor-pointer"
           >
             <option value="ALL">All Decisions</option>
-            {uniqueDecisions.map((decision) => (
-              <option key={decision} value={decision}>{decision.replaceAll('_', ' ')}</option>
-            ))}
+            {uniqueDecisions.map((decision) => {
+              const label = decision === 'CLAIM' ? 'Claim' : decision === 'REJECT' ? 'Reject' : decision === 'UNCERTAIN' ? 'Uncertain' : decision;
+              return <option key={decision} value={decision}>{label}</option>;
+            })}
           </select>
 
           {/* Fee Type Dropdown */}
@@ -108,7 +110,7 @@ export const ChargeTable: React.FC<ChargeTableProps> = ({
             onClick={onOpenReviewQueue}
             className="border border-[#151515] bg-[#F5F3EE] hover:bg-[#151515] hover:text-[#F5F3EE] text-[#151515] px-3 py-1.5 text-xs font-medium transition-colors cursor-pointer whitespace-nowrap active:translate-y-[1px]"
           >
-            Review Queue (38)
+            Review Queue ({reviewQueueCount})
           </button>
 
           <button
@@ -161,7 +163,7 @@ export const ChargeTable: React.FC<ChargeTableProps> = ({
                     {charge.id}
                   </td>
                   <td className="py-3 px-4 font-mono text-[#55524B]">
-                    {charge.unitId}
+                    {charge.unitId || '—'}
                   </td>
                   <td className="py-3 px-4 font-medium text-[#151515]">
                     {charge.chargeType}
@@ -173,7 +175,7 @@ export const ChargeTable: React.FC<ChargeTableProps> = ({
                     <DecisionBadge decision={charge.decision} size="sm" />
                   </td>
                   <td className="py-3 px-4 font-mono text-[#55524B] text-right tabular-nums">
-                    {charge.confidence}%
+                    {charge.confidence === null ? '—' : `${charge.confidence}%`}
                   </td>
                   <td className="py-3 px-4 text-[#737067] font-mono text-[11px]">
                     {charge.evidenceCount} Evidence

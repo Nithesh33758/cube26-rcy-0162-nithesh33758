@@ -1,20 +1,12 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
-</div>
+# Recovery Manager frontend
 
-# Run and deploy your AI Studio app
-
-This contains everything you need to run your app locally.
-
-View your app in AI Studio: https://ai.studio/apps/405c4621-6ef3-4080-a7fb-3d0a81d2d5b5
+React, TypeScript, and Vite frontend for the Recovery Manager application.
 
 ## Run Locally
 
-**Prerequisites:**  Node.js
+**Prerequisites:** Node.js and a running Spring Boot backend. The separate local Python model service is in [`../AI model/README.md`](../AI%20model/README.md).
 
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+1. Install dependencies: `npm install`
+2. Optionally set `VITE_API_BASE_URL` in `.env.local` (default `http://localhost:8081`).
+3. Run the app: `npm run dev`

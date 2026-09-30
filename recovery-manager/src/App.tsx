@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
-import { AppState, Charge, DecisionType, FileMetadata } from './types';
-import { generateFullDataset, INITIAL_REVIEW_ITEMS } from './data/mockData';
+import { AnalysisSummary, AppState, Charge, ChargeStatus, DecisionType, FileMetadata, ManagerType } from './types';
 import { Header, NavItem } from './components/Header';
 import { UploadPanel } from './components/UploadPanel';
 import { FileStatus } from './components/FileStatus';
@@ -13,21 +12,28 @@ import { EvidenceExplorer } from './components/EvidenceExplorer';
 import { ErrorState } from './components/ErrorState';
 import { DashboardView } from './components/DashboardView';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8081';
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
+const API_ORG_ID = 'org_demo_alpha';
 
 interface BackendCharge {
-  id: string;
+  id?: string;
+  lineId?: string;
   unitId: string | null;
   shipmentId?: string | null;
   orderId?: string | null;
   sku?: string | null;
+  fnsku?: string | null;
+  asin?: string | null;
   chargeType: string;
   chargeSubtype?: string | null;
   amount: number;
   currency: string;
   postedDate: string | null;
   chargedAt?: string | null;
+  granularity?: string;
+  description?: string | null;
   decision: DecisionType;
+  originalDecision?: DecisionType | null;
   decisionExplanation: string;
   confidence: number | null;
   evidenceCount: number;
@@ -35,22 +41,37 @@ interface BackendCharge {
   evidence: Array<{
     recordId: string;
     sourceType: string;
-    requirement: string;
+    requirement: string | null;
     status: string;
-    finding: string;
-    timestamp: string;
+    finding: string | null;
+    timestamp: string | null;
   }>;
   requirements: Array<{
-    id: string;
+    id: string | number;
     name: string;
     description: string;
+    chargeType: string;
     active: boolean;
   }>;
 }
 
 interface BackendAnalysisResult {
+  analysisId: string;
+  fileName: string;
   status: string;
+  totalRows: number;
+  processedRows: number;
+  failedRows: number;
+  createdAt: string;
+  summary: AnalysisSummary;
+  validationErrors?: BackendValidationError[];
   charges: BackendCharge[];
+}
+
+interface BackendValidationError {
+  row: number;
+  field: string;
+  error: string;
 }
 
 interface BackendErrorResponse {
@@ -59,53 +80,162 @@ interface BackendErrorResponse {
   message?: string;
   details?: string[];
   analysisId?: string;
+  status?: string;
+  missingColumns?: string[];
+  rowErrors?: Array<{ row: number; field: string; error: string }>;
+  headersValid?: boolean;
+  totalRows?: number;
 }
 
 function formatBackendError(response: BackendErrorResponse, fallback: string): string {
   const message = response.errorMessage || response.message || fallback;
-  const details = response.details?.filter(Boolean).join('; ');
+  const details = [
+    ...(response.details ?? []),
+    ...(response.missingColumns ?? []).map((column) => `Missing column: ${column}`),
+    ...(response.rowErrors ?? []).map((rowError) =>
+      `Row ${rowError.row} ${rowError.field}: ${rowError.error}`)
+  ].filter(Boolean).join('; ');
   const prefix = response.error ? `${response.error}: ` : '';
   return `${prefix}${message}${details ? ` (${details})` : ''}`;
 }
 
+function apiFetch(path: string, init: RequestInit = {}): Promise<Response> {
+  const headers = new Headers(init.headers);
+  headers.set('X-Org-Id', API_ORG_ID);
+  return fetch(`${API_BASE_URL}${path}`, { ...init, headers });
+}
+
+function managerForSource(sourceType: string): ManagerType {
+  switch (sourceType.toUpperCase()) {
+    case 'RECEIVING': return 'Receiving Manager';
+    case 'PREP': return 'Prep Manager';
+    case 'PACK': return 'Pack Manager';
+    case 'RETURNS': return 'Returns Manager';
+    default: return 'Unknown Source';
+  }
+}
+
+function mapChargeStatus(status: string): ChargeStatus {
+  switch (status) {
+    case 'Ready': return 'Ready';
+    case 'Pending Review':
+    case 'PENDING_REVIEW': return 'Pending Review';
+    case 'Contradicted': return 'Contradicted';
+    case 'Audited': return 'Audited';
+    case 'Already Reimbursed':
+    case 'ALREADY_REIMBURSED': return 'Already Reimbursed';
+    case 'Out of Window':
+    case 'OUT_OF_WINDOW': return 'Out of Window';
+    default: return 'Unknown';
+  }
+}
+
+function normalizeDecision(decision: string | null | undefined): DecisionType {
+  if (!decision) return 'UNCERTAIN';
+  const upper = decision.toUpperCase();
+  if (upper === 'CLAIM' || upper === 'CONTESTED') return 'CLAIM';
+  if (upper === 'REJECT' || upper === 'ACCEPTED' || upper === 'ALREADY_REIMBURSED' || upper === 'OUT_OF_WINDOW') return 'REJECT';
+  return 'UNCERTAIN';
+}
+
+function normalizeSummary(rawSummary: AnalysisSummary | null | undefined): AnalysisSummary {
+  if (!rawSummary) {
+    return {
+      totalCharges: 0,
+      claimsRecommended: 0,
+      rejected: 0,
+      uncertain: 0,
+      pendingReview: 0,
+      contested: 0,
+      accepted: 0,
+      insufficientEvidence: 0,
+      alreadyReimbursed: 0,
+      outOfWindow: 0,
+    };
+  }
+  const claimsRecommended = (rawSummary.claimsRecommended ?? 0) + (rawSummary.contested ?? 0);
+  const rejected = (rawSummary.rejected ?? 0) + (rawSummary.accepted ?? 0) + (rawSummary.alreadyReimbursed ?? 0) + (rawSummary.outOfWindow ?? 0);
+  const uncertain = (rawSummary.uncertain ?? 0) + (rawSummary.pendingReview ?? 0) + (rawSummary.insufficientEvidence ?? 0);
+  return {
+    ...rawSummary,
+    claimsRecommended,
+    rejected,
+    uncertain,
+    contested: claimsRecommended,
+    accepted: rejected,
+    pendingReview: uncertain,
+    insufficientEvidence: uncertain,
+    alreadyReimbursed: 0,
+    outOfWindow: 0,
+  };
+}
+
 function mapBackendCharges(backendCharges: BackendCharge[]): Charge[] {
   return backendCharges.map((charge) => ({
-    id: charge.id,
-    unitId: charge.unitId || charge.shipmentId || charge.orderId || 'Unattributed',
-    chargeType: charge.chargeSubtype ? `${charge.chargeType}: ${charge.chargeSubtype}` : charge.chargeType,
-    amount: Number(charge.amount),
-    currency: charge.currency || 'USD',
-    decision: charge.decision,
-    confidence: charge.confidence ?? 0,
+    id: charge.lineId || charge.id || '',
+    unitId: charge.unitId || '',
+    chargeType: charge.chargeType,
+    amount: charge.amount,
+    currency: charge.currency,
+    decision: normalizeDecision(charge.decision),
+    confidence: charge.confidence,
     evidenceCount: charge.evidenceCount,
-    status: charge.status === 'ALREADY_REIMBURSED' ? 'Already Reimbursed'
-      : charge.status === 'OUT_OF_WINDOW' ? 'Out of Window'
-      : charge.status === 'PENDING_REVIEW' ? 'Pending Review' : 'Ready',
+    status: mapChargeStatus(charge.status),
     date: charge.chargedAt || charge.postedDate || '',
     sku: charge.sku || '',
     fulfillmentCenter: '',
-    decisionExplanation: charge.decisionExplanation || 'No explanation provided.',
+    decisionExplanation: charge.decisionExplanation || '',
+    originalDecision: charge.originalDecision,
+    chargeSubtype: charge.chargeSubtype,
+    shipmentId: charge.shipmentId,
+    orderId: charge.orderId,
+    fnsku: charge.fnsku,
+    asin: charge.asin,
+    granularity: charge.granularity,
+    description: charge.description,
     requirements: charge.requirements.map((requirement) => ({
       id: String(requirement.id),
       name: requirement.name,
-      category: 'Operational',
-      status: 'MISSING',
+      category: 'Unspecified',
+      status: null,
       description: requirement.description,
-      ruleCode: `REQ-${requirement.id}`,
-      details: requirement.active ? 'Active requirement.' : 'Inactive requirement.'
+      ruleCode: String(requirement.id),
+      details: requirement.active ? 'Active' : 'Inactive',
+      active: requirement.active,
+      chargeType: requirement.chargeType
     })),
     evidence: charge.evidence.map((evidence) => ({
       id: evidence.recordId,
-      manager: 'Receiving Manager',
-      timestamp: evidence.timestamp,
-      stationId: evidence.sourceType,
+      manager: managerForSource(evidence.sourceType),
+      timestamp: evidence.timestamp || '',
+      stationId: '',
       operatorId: '',
       type: evidence.sourceType,
-      description: evidence.finding,
+      description: evidence.finding || '',
       systemRef: evidence.recordId,
-      status: evidence.status === 'VERIFIED' ? 'VERIFIED' : 'FLAGGED'
+      status: evidence.status,
+      requirement: evidence.requirement || undefined
     }))
   }));
+}
+
+const wait = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+
+async function fetchCompletedAnalysis(analysisId: string): Promise<BackendAnalysisResult> {
+  const deadline = Date.now() + 10 * 60 * 1000;
+  while (Date.now() < deadline) {
+    const response = await apiFetch(`/api/analysis/${encodeURIComponent(analysisId)}`);
+    const result = await response.json().catch(() => ({})) as BackendAnalysisResult & BackendErrorResponse;
+    if (!response.ok) {
+      throw new Error(formatBackendError(result, 'The backend could not return the analysis.'));
+    }
+    if (result.status === 'COMPLETED') return result;
+    if (result.status === 'FAILED') {
+      throw new Error(result.errorMessage || 'The backend analysis failed.');
+    }
+    await wait(1000);
+  }
+  throw new Error('The analysis did not complete before the wait limit.');
 }
 
 export default function App() {
@@ -118,8 +248,9 @@ export default function App() {
   const [simulateError, setSimulateError] = useState(false);
   const [hasCompletedProcessing, setHasCompletedProcessing] = useState(false);
 
-  // Loaded charges dataset
-  const [charges, setCharges] = useState<Charge[]>(() => generateFullDataset());
+  const [charges, setCharges] = useState<Charge[]>([]);
+  const [analysisSummary, setAnalysisSummary] = useState<AnalysisSummary | null>(null);
+  const [validationErrors, setValidationErrors] = useState<BackendValidationError[]>([]);
   const [selectedCharge, setSelectedCharge] = useState<Charge | null>(null);
 
   // Determine active navigation item based on current app state
@@ -177,6 +308,10 @@ export default function App() {
     setSelectedUpload(file || null);
     setAnalysisId(null);
     setErrorMessage(null);
+    setCharges([]);
+    setAnalysisSummary(null);
+    setValidationErrors([]);
+    setHasCompletedProcessing(false);
     // CRITICAL: DO NOT automatically start processing!
     // Transition only to FILE_SELECTED state and wait for user click.
     setCurrentState('FILE_SELECTED');
@@ -195,7 +330,7 @@ export default function App() {
     try {
       const formData = new FormData();
       formData.append('file', selectedUpload);
-      const uploadResponse = await fetch(`${API_BASE_URL}/api/analysis/upload`, {
+      const uploadResponse = await apiFetch('/api/analysis/upload', {
         method: 'POST',
         body: formData
       });
@@ -204,15 +339,15 @@ export default function App() {
         throw new Error(formatBackendError(uploadBody, 'The backend rejected the uploaded CSV.'));
       }
 
-      const startResponse = await fetch(`${API_BASE_URL}/api/analysis/${uploadBody.analysisId}/start`, {
+      setValidationErrors(uploadBody.rowErrors ?? []);
+      setAnalysisId(uploadBody.analysisId);
+      const startResponse = await apiFetch(`/api/analysis/${encodeURIComponent(uploadBody.analysisId)}/start`, {
         method: 'POST'
       });
+      const startBody = await startResponse.json().catch(() => ({})) as BackendErrorResponse;
       if (!startResponse.ok) {
-        const startBody = await startResponse.json().catch(() => ({})) as BackendErrorResponse;
         throw new Error(formatBackendError(startBody, 'The backend could not start this analysis.'));
       }
-
-      setAnalysisId(uploadBody.analysisId);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : 'Unable to connect to the analysis backend.');
       setCurrentState('FAILED');
@@ -222,7 +357,7 @@ export default function App() {
   const handleImportReimbursements = async (file: File): Promise<number> => {
     const formData = new FormData();
     formData.append('file', file);
-    const response = await fetch(`${API_BASE_URL}/api/reimbursements/upload`, {
+    const response = await apiFetch('/api/reimbursements/upload', {
       method: 'POST',
       body: formData
     });
@@ -241,12 +376,10 @@ export default function App() {
     }
 
     try {
-      const resultResponse = await fetch(`${API_BASE_URL}/api/analysis/${analysisId}`);
-      if (!resultResponse.ok) {
-        throw new Error('The backend could not return the completed analysis.');
-      }
-      const result = (await resultResponse.json()) as BackendAnalysisResult;
+      const result = await fetchCompletedAnalysis(analysisId);
       setCharges(mapBackendCharges(result.charges));
+      setAnalysisSummary(normalizeSummary(result.summary));
+      setValidationErrors(result.validationErrors ?? []);
       setHasCompletedProcessing(true);
       setCurrentState('RESULTS');
     } catch (error) {
@@ -283,6 +416,9 @@ export default function App() {
     setErrorMessage(null);
     setAnalysisId(null);
     setHasCompletedProcessing(false);
+    setCharges([]);
+    setAnalysisSummary(null);
+    setValidationErrors([]);
     setCurrentState('UPLOAD');
   };
 
@@ -291,6 +427,9 @@ export default function App() {
     setSelectedUpload(null);
     setAnalysisId(null);
     setErrorMessage(null);
+    setCharges([]);
+    setAnalysisSummary(null);
+    setValidationErrors([]);
     setCurrentState('UPLOAD');
   };
 
@@ -314,6 +453,8 @@ export default function App() {
         {/* NEW DASHBOARD: Long scroll-based executive recovery intelligence view */}
         {currentState === 'DASHBOARD' && (
           <DashboardView
+            summary={analysisSummary}
+            charges={charges}
             onNavigateToCharges={() => handleSelectNav('Charges')}
             onNavigateToReviews={() => setCurrentState('REVIEW')}
             onNavigateToEvidence={() => setCurrentState('EVIDENCE')}
@@ -355,6 +496,7 @@ export default function App() {
         {/* State 3: PROCESSING (Dedicated processing screen, results are NEVER visible) */}
         {currentState === 'PROCESSING' && (
           <ProcessingPipeline
+            totalRows={selectedFile?.rowCount ?? 0}
             onComplete={handleProcessingComplete}
             onError={handleProcessingError}
             simulateError={simulateError}
@@ -365,6 +507,8 @@ export default function App() {
         {currentState === 'RESULTS' && (
           <ResultsView
             charges={charges}
+            summary={analysisSummary}
+            validationErrors={validationErrors}
             onSelectCharge={handleSelectCharge}
             onOpenReviewQueue={() => setCurrentState('REVIEW')}
             onOpenAnalytics={() => setCurrentState('ANALYTICS')}
@@ -386,7 +530,7 @@ export default function App() {
         {/* Contextual Screen: REVIEW QUEUE */}
         {currentState === 'REVIEW' && (
           <ReviewQueue
-            items={INITIAL_REVIEW_ITEMS}
+            charges={charges}
             onBack={handleBackToResults}
             onSelectChargeId={handleSelectChargeId}
           />
@@ -394,7 +538,7 @@ export default function App() {
 
         {/* Contextual Screen: ANALYTICS */}
         {currentState === 'ANALYTICS' && (
-          <AnalyticsPanel onBack={handleBackToResults} />
+          <AnalyticsPanel charges={charges} summary={analysisSummary} onBack={handleBackToResults} />
         )}
 
         {/* Contextual Screen: EVIDENCE EXPLORER */}

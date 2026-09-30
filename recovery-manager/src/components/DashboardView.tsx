@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { AnalysisSummary, Charge } from '../types';
+import { DecisionBadge } from './DecisionBadge';
 import { useInView, useCountUp } from '../hooks/useInView';
 import {
   ArrowRight,

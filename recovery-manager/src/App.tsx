@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { AnalysisSummary, AppState, Charge, ChargeStatus, DecisionType, FileMetadata, ManagerType } from './types';
 import { Header, NavItem } from './components/Header';
 import { UploadPanel } from './components/UploadPanel';
@@ -238,20 +238,98 @@ async function fetchCompletedAnalysis(analysisId: string): Promise<BackendAnalys
   throw new Error('The analysis did not complete before the wait limit.');
 }
 
+const SESSION_STORAGE_KEY = 'sydon_rcm_session_v1';
+
+interface SavedSession {
+  currentState: AppState;
+  selectedFile: FileMetadata | null;
+  analysisId: string | null;
+  hasCompletedProcessing: boolean;
+  charges: Charge[];
+  analysisSummary: AnalysisSummary | null;
+  validationErrors: BackendValidationError[];
+  selectedChargeId: string | null;
+}
+
+function loadSavedSession(): SavedSession | null {
+  try {
+    const raw = sessionStorage.getItem(SESSION_STORAGE_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch (error) {
+    console.warn('Failed to load session from sessionStorage:', error);
+    return null;
+  }
+}
+
+function clearSavedSession(): void {
+  try {
+    sessionStorage.removeItem(SESSION_STORAGE_KEY);
+  } catch (error) {
+    console.warn('Failed to clear sessionStorage:', error);
+  }
+}
+
 export default function App() {
-  // Application State: initial state is UPLOAD so the existing page looks exactly as before on load
-  const [currentState, setCurrentState] = useState<AppState>('UPLOAD');
-  const [selectedFile, setSelectedFile] = useState<FileMetadata | null>(null);
+  const [savedSession] = useState<SavedSession | null>(loadSavedSession);
+
+  // Application State: restore from session if available, else start at UPLOAD
+  const [currentState, setCurrentState] = useState<AppState>(() => {
+    if (savedSession?.hasCompletedProcessing && savedSession.currentState) {
+      if (savedSession.currentState === 'PROCESSING' || savedSession.currentState === 'FAILED') {
+        return 'RESULTS';
+      }
+      return savedSession.currentState;
+    }
+    return 'UPLOAD';
+  });
+
+  const [selectedFile, setSelectedFile] = useState<FileMetadata | null>(() => savedSession?.selectedFile ?? null);
   const [selectedUpload, setSelectedUpload] = useState<File | null>(null);
-  const [analysisId, setAnalysisId] = useState<string | null>(null);
+  const [analysisId, setAnalysisId] = useState<string | null>(() => savedSession?.analysisId ?? null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [simulateError, setSimulateError] = useState(false);
-  const [hasCompletedProcessing, setHasCompletedProcessing] = useState(false);
+  const [hasCompletedProcessing, setHasCompletedProcessing] = useState<boolean>(() => savedSession?.hasCompletedProcessing ?? false);
 
-  const [charges, setCharges] = useState<Charge[]>([]);
-  const [analysisSummary, setAnalysisSummary] = useState<AnalysisSummary | null>(null);
-  const [validationErrors, setValidationErrors] = useState<BackendValidationError[]>([]);
-  const [selectedCharge, setSelectedCharge] = useState<Charge | null>(null);
+  const [charges, setCharges] = useState<Charge[]>(() => savedSession?.charges ?? []);
+  const [analysisSummary, setAnalysisSummary] = useState<AnalysisSummary | null>(() => savedSession?.analysisSummary ?? null);
+  const [validationErrors, setValidationErrors] = useState<BackendValidationError[]>(() => savedSession?.validationErrors ?? []);
+  const [selectedCharge, setSelectedCharge] = useState<Charge | null>(() => {
+    if (savedSession?.selectedChargeId && savedSession?.charges) {
+      return savedSession.charges.find((c) => c.id === savedSession.selectedChargeId) || null;
+    }
+    return null;
+  });
+
+  // Automatically sync session state to sessionStorage
+  useEffect(() => {
+    if (hasCompletedProcessing && charges.length > 0) {
+      try {
+        const payload: SavedSession = {
+          currentState,
+          selectedFile,
+          analysisId,
+          hasCompletedProcessing,
+          charges,
+          analysisSummary,
+          validationErrors,
+          selectedChargeId: selectedCharge?.id ?? null,
+        };
+        sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(payload));
+      } catch (e) {
+        console.warn('Unable to persist session to sessionStorage:', e);
+      }
+    }
+  }, [
+    currentState,
+    selectedFile,
+    analysisId,
+    hasCompletedProcessing,
+    charges,
+    analysisSummary,
+    validationErrors,
+    selectedCharge,
+  ]);
 
   // Determine active navigation item based on current app state
   const getActiveNav = (): NavItem => {
@@ -304,6 +382,7 @@ export default function App() {
 
   // Handlers for existing workflow transitions
   const handleFileSelected = (metadata: FileMetadata, file?: File) => {
+    clearSavedSession();
     setSelectedFile(metadata);
     setSelectedUpload(file || null);
     setAnalysisId(null);
@@ -410,6 +489,7 @@ export default function App() {
   };
 
   const handleResetToUpload = () => {
+    clearSavedSession();
     setSelectedFile(null);
     setSelectedUpload(null);
     setSelectedCharge(null);
@@ -423,6 +503,7 @@ export default function App() {
   };
 
   const handleChangeFile = () => {
+    clearSavedSession();
     setSelectedFile(null);
     setSelectedUpload(null);
     setAnalysisId(null);
